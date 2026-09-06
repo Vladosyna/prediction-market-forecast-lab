@@ -2118,6 +2118,42 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+- condition_id: '0x9e03b82afb7654f4a2c6db3cc4bf6f1f74b53547ea3600001dac127decb34a23'
+  question: Will Moises Ballesteros win the 2026 NL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBNLROTY-26-MBAL
+  external_question: Will Moises Ballesteros win NL ROTY?
+  rationale: Both markets resolve to whether Moises Ballesteros wins the 2026 National
+    League Rookie of the Year award. The Polymarket question names the specific player
+    and award, and its resolution criteria confirm resolution to the official winner
+    of that award. The Kalshi market's specific outcome, as indicated by ticker and
+    outcome labels, is 'Moises Ballesteros wins NL ROTY in 2026.' The event, player,
+    season, and award match exactly, with no meaningful criterion divergence. The
+    tie-break rule in Polymarket (alphabetical last name) would only apply if multiple
+    winners are announced, but both markets still resolve to the same official winner
+    as recognized by MLB, so the outcome for this specific named player remains aligned.
+  confidence: 1.0
+  proposed_ts: '2026-09-06T21:00:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xd1cf25d541256ff9b571718cedc6dfe968b0dff60aea1289686d050aab7561df'
+  question: Will Bubba Chandler win the 2026 NL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBNLROTY-26-BCHA
+  external_question: Will Bubba Chandler win NL ROTY?
+  rationale: Both markets resolve to Yes/true if Bubba Chandler wins the 2026 National
+    League Rookie of the Year award, and No/false otherwise. The Polymarket resolution
+    criteria describe the broader set of individual winners but the question names
+    Bubba Chandler specifically, matching the Kalshi outcome. The event, season, award,
+    and candidate are identical.
+  confidence: 0.95
+  proposed_ts: '2026-09-06T21:00:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
