@@ -947,3 +947,89 @@ Kalshi interval from that period should be read as valid.
 power. It was found by auditing whether the study can answer its own questions, it makes the answer
 worse, and it is filed before the freeze rather than discovered afterwards. A correction that moved
 the other way would deserve far more suspicion than this one.
+
+**Addendum 9.26 (2026-09-07).** Kalshi's forecast coverage collapsed again, this time because the
+football season listed more sports markets than the venue's snapshot round could carry. From today
+the venue-wide Kalshi rounds no longer snapshot sports markets outside the null-control sample. The
+lost days are disclosed as an exclusion window; the change to what is collected is declared here
+before it takes effect.
+
+**The measurement.** Distinct Kalshi markets receiving at least one forecast per day ran 1,936 to
+2,774 through 2026-08-29. Then: **10** on 08-30, 2,744 on 08-31, 2,384 on 09-01, and **12, 10, 12,
+12, 33, 10** on 09-02 through 09-07 — under half a percent of normal coverage for six of the last
+nine days. Forecast rows for the venue fell from ~12,000/day to 50–165.
+
+**The cause, measured rather than inferred.** Kalshi listed **13,290 new sports markets between
+2026-08-20 and today** — `KXCYCLINGSTAGE` (1,000), `KXNCAAFCFPPOLL` (360), `KXMLBTEAMTOTAL` (315),
+`KXNCAAFTOPCFPPOLL` (300), `KXNFLRACE` (240) and their season-mates, median volume 0. Sports is now
+**11,625 of the 16,673 Kalshi markets in the snapshotted tiers, 69.7%**. The tail round grew with
+it and stopped fitting its own cadence: the last three rounds covered 16,046–16,181 markets and
+completed at 23:42, 01:08 and 02:39, **~86 minutes apart against a configured 30-minute interval**,
+so APScheduler skipped two of every three firings (`max_instances=1`) and the realized grid sits at
+guardrail 13's 90-minute tail bound with no margin at all. The forecast pass of 2026-09-07 02:00
+duly logged **4,959 markets skipped on stale prices** and ran on 1,571 eligible markets across both
+venues. The starved markets are economics and politics: `eligible_market_states` applies the sports
+filter before the freshness check, so not one of those 4,959 was a sports market.
+
+**Why this is a policy failure rather than a capacity failure.** Under §3 sports is the null
+control — "a small random sample of sports markets in the ledger, forecast by the cheap models
+only", 30 markets, seeded. The other 11,595 can never receive a forecast: the eligibility filter
+drops them first, and addendum 9.23 closed the two write paths that had been reaching them anyway.
+The venue's snapshot budget was therefore spending ~70% of itself on a population this plan
+excludes by construction, and the cost of that was paid by the population it studies.
+
+**The change.** From today the venue-wide Kalshi snapshot rounds (`liquid` and `tail`) collect only
+markets that can become forecast targets: everything except sports markets outside the sample. The
+tail round drops from ~16,050 markets to ~4,400, which at the throughput just measured (3.1
+markets/s) is ~24 minutes — inside its 30-minute interval. Reversible in configuration
+(`universe.null_control.snapshot_unsampled: true` restores the previous behaviour exactly).
+
+Three scope limits, stated because each was a live alternative:
+
+- **The per-pair high-frequency job is not filtered.** Phase 17 item 3's confirmed cross-venue
+  pairs are snapshotted from an explicit id list, and their value is the price series itself (H3's
+  lead-lag, now exploratory under 9.24), not any forecast written against it. A confirmed sports
+  pair keeps both legs at full cadence.
+- **The resolution watcher is not filtered.** It still polls every Kalshi market, sports included,
+  so outcomes keep accruing for M1/M1.x recalibration fits and M2 base rates. That dilutes the
+  watcher's round-robin by the same ~70%; it is measured, left alone, and named here rather than
+  bundled into a change whose research consequences would be different in kind.
+- **Polymarket is unchanged.** Its rounds are not budget-bound after addendum 9.21 (tail median
+  snapshot age 34.4 min against a 90-minute bound), so the same filter would buy nothing there —
+  and it would cost something. Tiering falls back to venue-reported figures when a market has no
+  recent snapshot to measure depth from, and Polymarket's fallback tail bar is real
+  (`min_liquidity` 1000 / `min_volume` 5000), so an unsampled sports market could drop out of
+  `tier IN ('liquid','tail')`, leave the pool the control samples from, and never be drawable
+  again. Kalshi's fallback tail bar is `min_volume: 0, min_open_interest: 0`, which every market
+  clears, so on that venue the pool after this change is the pool before it. **The null control's
+  sampling frame is unchanged, and a test asserts the config fact that makes that true.**
+
+**What is lost.** Snapshot history for ~11,600 Kalshi sports markets stops today and cannot be
+recovered later; a future study of sports-market microstructure on this venue would not find it
+here. That is the trade being made, and it is made in favour of the population this plan exists to
+measure. One second-order effect is bounded and disclosed: when a market enters the null-control
+sample as an older one resolves, it carries no fresh snapshot until the next round, so its first
+forecast may be skipped under guardrail 13 — at most one round (5 or 30 minutes) per market
+entering the sample.
+
+**Standing under this plan.** Not repairable, for the same reason 9.17 was not: the ledger is
+append-only and forecasts cannot be written retroactively without destroying freeze semantics.
+**2026-08-30 and 2026-09-02 to 2026-09-07 inclusive are exclusion windows for any
+Kalshi-population statistic**, excluded rather than down-weighted. The 10–33 markets a day that
+survived are not suspect individually — each was frozen against a fresh price — but they are
+whichever markets the starved round happened to reach in time, a subset selected by the defect
+itself, and must never be read as a random sample of the venue. Kalshi loses seven days of accrual
+toward H1 and H2, on top of 9.17's six.
+
+**On the monitoring gap 9.17 predicted would recur.** It recurred, and this time the instrument
+saw it: the coverage watchdog added on 2026-08-26 fired on 2026-09-02, its first real day, naming
+six model/venue series at 0% of their own fourteen-day median. What it could not do is tell anyone
+— §12 forbids this lab from notifying, and the watchdog writes to the log and to `lab status`,
+which a travelling operator reads when they read it. Five of the seven lost days are that gap, not
+a detection failure. The dead-man heartbeat of Phase 18 covers a dead collector; nothing covers a
+collector that is alive and collecting the wrong markets.
+
+**Direction.** This change removes data (sports snapshots) and the disclosure removes power (seven
+more days of Kalshi). Both were found by auditing whether the study can still answer its own
+questions, both make the answer worse before they make it better, and both are filed before the
+freeze.

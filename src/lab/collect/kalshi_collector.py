@@ -249,10 +249,72 @@ async def sync_kalshi_universe(
 
 def tracked_kalshi_markets(conn) -> list[dict]:
     rows = conn.execute(
-        "SELECT condition_id, venue_native_id, tier FROM markets "
+        "SELECT condition_id, venue_native_id, tier, category FROM markets "
         "WHERE venue = 'kalshi' AND active = 1 AND closed = 0"
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def drop_unsampled_sports(conn, config: dict[str, Any],
+                          markets: list[dict]) -> tuple[list[dict], int]:
+    """Of `markets`, the ones a venue-wide snapshot round should collect:
+    everything except sports markets outside the seeded null-control sample.
+
+    Those markets cannot become forecast targets. `eligible_market_states`
+    drops them before it checks anything else, and `drop_null_control_outsiders`
+    guards the two models that write outside it -- §3 keeps "a small random
+    sample of sports markets in the ledger", and a control whose membership is
+    not controlled is not a control. So a request spent on them buys no
+    research observation, only a parquet row nothing reads.
+
+    That was harmless while it was cheap, and it stopped being cheap when the
+    football season opened. Measured 2026-09-03: of 16,164 Kalshi markets in
+    the snapshotted tiers, 11,783 (73%) were sports, 4,333 of them listed in
+    the previous ten days (KXCYCLINGSTAGE 1,000, KXNCAAFCFPPOLL 360,
+    KXMLBTEAMTOTAL 315, KXNFLRACE 240), median volume 0. The tail round no
+    longer fit inside guardrail 13's 90-minute bound -- 4,918 markets carried
+    no snapshot at all and the median age of the rest was 80.6 minutes -- so on
+    2026-09-02 the forecast pass skipped 4,211 markets on stale prices (21 in
+    late August) and Kalshi's forecast count fell from 19,895/day to 7,915.
+    The starved markets were economics and politics: the sports filter runs
+    first, so none of those 4,211 were sports. The budget was being spent on
+    the population the policy excludes, at the expense of the one it studies.
+
+    **Kalshi only, deliberately.** Polymarket's rounds are left alone: they are
+    not budget-bound after the 2026-08-22 concurrency change (tail median age
+    34.4 min against the 90-minute bound), so this would buy nothing there --
+    and it would cost something. Tiering falls back to venue-reported figures
+    once a market has no recent snapshot to measure depth from, and
+    Polymarket's fallback tail bar is real (`min_liquidity` 1000 /
+    `min_volume` 5000), so an unsampled sports market could fall out of
+    `tier IN ('liquid','tail')`, leave the pool `null_control_ids` samples
+    from, and never be drawable again -- the policy would slowly select its own
+    control. Kalshi's fallback tail bar is `min_volume: 0,
+    min_open_interest: 0`, which every market clears, so the pool this returns
+    a subset of is exactly the pool it was before. Turnover stays what it was:
+    driven by markets resolving, not by what we chose to stop measuring.
+
+    Not written to `universe_log`: these are not universe exclusions (the
+    markets stay tracked, synced and resolution-watched) and it would add
+    ~11,700 rows a day to a table read only as daily counts. The set is exactly
+    reproducible from `null_control.random_seed` and the market table, which is
+    what an auditor actually needs.
+
+    Returns (kept, dropped_count).
+    """
+    nc = config["universe"]["null_control"]
+    if nc.get("snapshot_unsampled", False):
+        return markets, 0
+    nc_category = nc["category"]
+    if not any(m.get("category") == nc_category for m in markets):
+        return markets, 0   # nothing to decide; the liquid round is mostly economics
+
+    from lab.forecast import null_control_ids
+
+    sampled = null_control_ids(conn, config)
+    kept = [m for m in markets
+            if m.get("category") != nc_category or m["condition_id"] in sampled]
+    return kept, len(markets) - len(kept)
 
 
 def tracked_kalshi_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
@@ -379,6 +441,13 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore,
     """
     markets = [m for m in tracked_kalshi_markets(conn)
                if (m.get("tier") == "liquid") == (tier == "liquid")]
+    # Sports markets outside the null-control sample are not forecastable and
+    # were consuming 73% of this venue's request budget -- see
+    # drop_unsampled_sports. The per-pair high-frequency job (Phase 17 item 3)
+    # takes an explicit condition_id list and is deliberately NOT filtered:
+    # its snapshots serve the lead-lag hypothesis (PAP H3), which reads the
+    # price series itself rather than any forecast written against it.
+    markets, dropped = drop_unsampled_sports(conn, config, markets)
     if not markets:
         log.info("kalshi snapshot round: no markets", extra={"ctx": {"tier": tier}})
         return 0
@@ -395,6 +464,7 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore,
         concurrency=config["venues"]["kalshi"].get("snapshot_concurrency", 1))
     log.info("kalshi snapshot round done",
              extra={"ctx": {"tier": tier, "markets": len(markets),
+                            "unsampled_sports_skipped": dropped,
                             "with_depth": len(markets) if depth_levels else 0,
                             "written": written}})
     return written

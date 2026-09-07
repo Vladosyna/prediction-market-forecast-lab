@@ -489,7 +489,12 @@ def test_snapshot_kalshi_rounds_are_per_tier(tmp_path):
 
     cfg = {"venues": {"kalshi": {"snapshot_interval_minutes": {"liquid": 5, "tail": 30},
                                  "snapshot_concurrency": 4}},
-           "collect": {"book_depth_levels": 10}}
+           "collect": {"book_depth_levels": 10},
+           # The round consults the null-control snapshot policy (PAP 9.26)
+           # before it fetches anything; these rows are all economics, so the
+           # policy has nothing to decide here -- but it is read, not guessed.
+           "universe": {"null_control": {"category": "sports", "sample_size": 30,
+                                         "random_seed": 42, "snapshot_unsampled": False}}}
     store = SnapshotStore(tmp_path / "snapshots")
 
     assert asyncio.run(snapshot_kalshi(_Client(), conn, store, cfg, tier="liquid")) == 1

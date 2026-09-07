@@ -9,6 +9,7 @@ from typing import Any
 
 import polars as pl
 
+from lab.collect.kalshi_collector import drop_unsampled_sports
 from lab.store import db as dbmod
 from lab.store.snapshots import SnapshotStore, utc_date_str
 from lab.util import now_utc
@@ -271,13 +272,24 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     cadence = config["collect"]["snapshot_interval_minutes"]
     out["tiers"] = {}
     for tier in ("liquid", "tail"):
-        markets = [
-            r["condition_id"]
+        rows = [
+            dict(r)
             for r in conn.execute(
-                "SELECT condition_id FROM markets WHERE tier = ? AND active = 1 AND closed = 0",
+                "SELECT condition_id, category, venue FROM markets "
+                "WHERE tier = ? AND active = 1 AND closed = 0",
                 (tier,),
             )
         ]
+        markets = [r["condition_id"] for r in rows]
+        # `tracked_markets` is not the number the round works through, and
+        # from 2026-09-07 the gap is large: Kalshi no longer snapshots sports
+        # markets outside the null-control sample (PAP 9.26), which on that
+        # date was 11,753 of the venue's 16,164 tail markets. Reporting only
+        # the tracked count would repeat the failure this file already calls
+        # out for the resolution backlog below -- a dashboard number that is
+        # not the working set. Same predicate as the round, not a copy of it.
+        _, unsampled = drop_unsampled_sports(
+            conn, config, [r for r in rows if (r["venue"] or "polymarket") == "kalshi"])
         ts_sorted = tier_snapshot_timestamps(store, dates7, markets)
         last_age_min = None
         if ts_sorted:
@@ -285,6 +297,8 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
             last_age_min = round((now - last_ts).total_seconds() / 60, 1)
         out["tiers"][tier] = {
             "tracked_markets": len(markets),
+            "snapshot_targets": len(markets) - unsampled,
+            "unsampled_sports": unsampled,
             "last_snapshot_age_min": last_age_min,
             "gaps_24h": len(gaps_from_timestamps(
                 ts_sorted, cadence_buckets(cadence[tier], now - timedelta(hours=24), now))),
@@ -418,8 +432,12 @@ def format_status(status: dict[str, Any]) -> str:
     for tier, s in status["tiers"].items():
         age = s["last_snapshot_age_min"]
         age_str = f"{age}min" if age is not None else "never"
+        tracked = f"tracked={s['tracked_markets']}"
+        if s.get("unsampled_sports"):
+            tracked += (f" (snapshotted={s['snapshot_targets']},"
+                        f" unsampled_sports={s['unsampled_sports']})")
         lines.append(
-            f"  [{tier}] tracked={s['tracked_markets']} "
+            f"  [{tier}] {tracked} "
             f"last_snapshot_age={age_str} "
             f"gaps_24h={s['gaps_24h']} gaps_7d={s['gaps_7d']}"
         )

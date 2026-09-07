@@ -53,6 +53,18 @@ universe:
     category: sports
     sample_size: 30
     random_seed: 42
+    # Whether the venue-wide snapshot rounds also collect the sports markets
+    # that are NOT in the sample. false from 2026-09-07 (PAP 9.26), wired to
+    # Kalshi's rounds only -- see kalshi_collector.drop_unsampled_sports for
+    # why not Polymarket's. These markets can never become forecast targets
+    # (the eligibility filter drops them before anything else), so every
+    # request spent on them buys no research observation, and on Kalshi they
+    # had grown to 73% of the venue's snapshot budget: the NFL/NCAA season
+    # added 4,333 sports markets in ten days, the round stopped fitting inside
+    # its own freshness bound, and the venue fell out of the forecastable
+    # population entirely on 2026-09-02/03.
+    # true restores the pre-2026-09-07 behaviour byte-for-byte.
+    snapshot_unsampled: false
 
 # --- Collection ---------------------------------------------------------
 collect:
