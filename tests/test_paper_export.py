@@ -9,6 +9,7 @@ git-orchestration pattern and tests/test_export_paper.py's fixture seeding).
 
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 from datetime import datetime, timezone
@@ -103,17 +104,17 @@ def _install_failing_precommit_hook(repo):
 # --- paths ------------------------------------------------------------
 
 def test_paper_export_paths_use_today_by_default(config):
-    jsonl_path, meta_path = pe.paper_export_paths(config)
-    assert jsonl_path.name == "2026-07-10.jsonl"
-    assert meta_path.name == "2026-07-10.jsonl.meta.json"
-    assert jsonl_path.parent.name == "paper_exports"
+    gz_path, meta_path = pe.paper_export_paths(config)
+    assert gz_path.name == "2026-07-10.jsonl.gz"
+    assert meta_path.name == "2026-07-10.jsonl.gz.meta.json"
+    assert gz_path.parent.name == "paper_exports"
 
 
 def test_paper_export_paths_honor_explicit_dt(config):
     dt = datetime(2026, 1, 5, tzinfo=timezone.utc)
-    jsonl_path, meta_path = pe.paper_export_paths(config, dt=dt)
-    assert jsonl_path.name == "2026-01-05.jsonl"
-    assert meta_path.name == "2026-01-05.jsonl.meta.json"
+    gz_path, meta_path = pe.paper_export_paths(config, dt=dt)
+    assert gz_path.name == "2026-01-05.jsonl.gz"
+    assert meta_path.name == "2026-01-05.jsonl.gz.meta.json"
 
 
 # --- write_paper_export -------------------------------------------------
@@ -124,8 +125,9 @@ def test_write_paper_export_matches_export_paper_jsonl(config, conn):
     assert result["written"] is True
     assert result["row_count"] == 3
 
-    jsonl_path, meta_path = pe.paper_export_paths(config)
-    written_lines = jsonl_path.read_text(encoding="utf-8").splitlines()
+    gz_path, meta_path = pe.paper_export_paths(config)
+    with gzip.open(gz_path, "rt", encoding="utf-8") as fh:
+        written_lines = fh.read().splitlines()
     direct_lines = list(export_paper_jsonl(conn))
     assert written_lines == direct_lines
     for line in written_lines:
@@ -144,8 +146,8 @@ def test_write_paper_export_is_idempotent_same_day(config, conn):
     second = pe.write_paper_export(conn, config)
     assert second == {"written": False, "reason": "already_exists",
                       "path": second["path"]}
-    jsonl_path, _ = pe.paper_export_paths(config)
-    assert second["path"] == str(jsonl_path)
+    gz_path, _ = pe.paper_export_paths(config)
+    assert second["path"] == str(gz_path)
 
 
 # --- git orchestration -----------------------------------------------------
@@ -162,8 +164,8 @@ def test_commit_and_push_creates_real_git_commit(config, conn, tmp_path, monkeyp
     assert result["row_count"] == 3
 
     log = subprocess.run(["git", "log", "--name-only", "-1"], cwd=repo, capture_output=True, text=True)
-    assert "docs/paper_exports/2026-07-10.jsonl" in log.stdout
-    assert "docs/paper_exports/2026-07-10.jsonl.meta.json" in log.stdout
+    assert "docs/paper_exports/2026-07-10.jsonl.gz" in log.stdout
+    assert "docs/paper_exports/2026-07-10.jsonl.gz.meta.json" in log.stdout
 
 
 def test_commit_and_push_reverts_files_on_commit_failure_then_retry_succeeds(
@@ -176,13 +178,13 @@ def test_commit_and_push_reverts_files_on_commit_failure_then_retry_succeeds(
     monkeypatch.setattr(pe, "PROJECT_ROOT", repo)
 
     _seed(conn)
-    jsonl_path, meta_path = pe.paper_export_paths(config)
+    gz_path, meta_path = pe.paper_export_paths(config)
 
     result = pe.commit_and_push_paper_export(config, conn)
     assert "error" in result
     # Both newly-written files must be gone -- otherwise a retry would think
     # today's date was already exported and skip it, permanently orphaning it.
-    assert not jsonl_path.exists()
+    assert not gz_path.exists()
     assert not meta_path.exists()
 
     (repo / ".git" / "hooks" / "pre-commit").unlink()
@@ -215,3 +217,63 @@ def test_job_never_raises_when_commit_and_push_raises(config, monkeypatch):
     monkeypatch.setattr("lab.paper_export.commit_and_push_paper_export", boom)
     result = jobs.run_paper_export_job(config)
     assert result == {"error": "paper_export_failed"}
+
+
+# --- gzip container (2026-09-08, PAP 9.28) ---------------------------------
+
+def test_the_gz_round_trips_to_exactly_export_paper_jsonl(config, conn):
+    """The container changed; the dataset did not."""
+    _seed(conn)
+    pe.write_paper_export(conn, config)
+    gz_path, _ = pe.paper_export_paths(config)
+    with gzip.open(gz_path, "rt", encoding="utf-8") as fh:
+        assert fh.read().splitlines() == list(export_paper_jsonl(conn))
+
+
+def test_two_exports_of_the_same_rows_are_byte_identical(config, conn, tmp_path):
+    """gzip stamps time.time() and a basename into its header unless told not
+    to. §15 exists so a reviewer can re-derive an artifact and get the same
+    bytes back; a refactor to a bare gzip.open() would silently end that, and
+    this is the test that would notice."""
+    _seed(conn)
+    pe.write_paper_export(conn, config)
+    gz_path, meta_path = pe.paper_export_paths(config)
+    first = gz_path.read_bytes()
+
+    gz_path.unlink()
+    meta_path.unlink()
+    pe.write_paper_export(conn, config)
+    assert gz_path.read_bytes() == first
+
+
+def test_a_manifest_failure_leaves_no_payload_behind(config, conn, monkeypatch):
+    """The exists() gate treats a lone .gz as "already exported", so a payload
+    written without its manifest would orphan that date permanently -- and the
+    two-file pair is what docs/paper_export_schema.md promises reviewers."""
+    _seed(conn)
+
+    def boom(*a, **kw):
+        raise RuntimeError("code_version failed")
+
+    monkeypatch.setattr("lab.export.paper_export_manifest", boom)
+    with pytest.raises(RuntimeError):
+        pe.write_paper_export(conn, config)
+
+    gz_path, meta_path = pe.paper_export_paths(config)
+    assert not gz_path.exists() and not meta_path.exists()
+    assert not list(gz_path.parent.glob("*.tmp")), "no litter either"
+
+
+def test_a_legacy_plain_jsonl_for_today_still_counts_as_exported(config, conn):
+    """Deploy-day only, and it matters exactly once: the extension changed, so
+    without this a catch-up run would write a second export pair for a date
+    already snapshotted as plain .jsonl."""
+    _seed(conn)
+    gz_path, _ = pe.paper_export_paths(config)
+    legacy = gz_path.with_suffix("")           # .../2026-07-10.jsonl
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("{}\n", encoding="utf-8")
+
+    result = pe.write_paper_export(conn, config)
+    assert result["written"] is False and result["reason"] == "already_exists"
+    assert not gz_path.exists()

@@ -278,7 +278,7 @@ cost caps) — every default is documented inline.
 | `lab eval` | Score resolved forecasts: paired Brier / log loss, skill with bootstrap CIs |
 | `lab report` | Render the static HTML report |
 | `lab shadow` | Simulated shadow portfolio (SIMULATION only) |
-| `lab export` | Latest forecast per (market, model) as JSONL — the integration point; `--paper` emits the full resolved-forecast replication dataset + manifest instead |
+| `lab export` | Latest forecast per (market, model) as JSONL — the integration point; `--paper` emits the full resolved-forecast replication dataset + manifest instead (plain JSONL, or gzipped if `--out` ends in `.gz`; the weekly automated snapshot under `docs/paper_exports/` is gzipped from 2026-09-13 — see `docs/paper_export_schema.md` for the split date) |
 | `lab status` | Data health: snapshot freshness, gaps, watcher lag, spend |
 | `lab learn` | Monthly learning loop: batch refits, champion/challenger, post-mortems |
 | `lab rollback <model_id>` | Manually revert a model's active version to a prior one, outside the monthly learn cycle |

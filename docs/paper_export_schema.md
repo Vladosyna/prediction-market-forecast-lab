@@ -11,7 +11,10 @@
   scored, not a separate reconstruction.
 - `<path>.meta.json` — a manifest: the exact code version and schema version
   that produced the export, when it was generated, and how many rows it
-  contains, so a reviewer can verify what they are re-analyzing.
+  contains, so a reviewer can verify what they are re-analyzing. Note what it
+  does **not** contain: no field hashes the payload's bytes, so the manifest is
+  a provenance record, not a tamper seal. Re-compressing or re-serialising a
+  file leaves no signature in it.
 
 No PII exists anywhere in this schema (there are no user/account records at
 all), so "anonymized" here means exactly one thing: internal/operational
@@ -54,9 +57,33 @@ else needs redacting.
 
 ## Automated weekly snapshot
 
-Since v2.8, `docs/paper_exports/YYYY-MM-DD.jsonl` (+ matching
-`YYYY-MM-DD.jsonl.meta.json`) is produced automatically every week
-(`paper_export.cron`, default Sunday 05:00 UTC) and committed to this public
-repo, using the exact schema and manifest fields documented above — the CLI's
-manual `lab export --paper --out <path>` flow is unaffected and remains
-available for one-off exports. See `src/lab/paper_export.py`.
+Since v2.8, a dated snapshot (+ matching `.meta.json`) is produced
+automatically every week under `docs/paper_exports/` and committed to this
+public repo, using the exact schema and manifest fields documented above. The
+deployed schedule is `paper_export.cron` in `config.yaml`, currently
+`"0 11 * * sun"` (Sundays, 11:00 UTC). See `src/lab/paper_export.py`.
+
+**The container changed on 2026-09-08, and the split date matters when you
+read these files:**
+
+| Dates | File |
+|---|---|
+| `2026-07-10` … `2026-08-30` | `YYYY-MM-DD.jsonl` + `YYYY-MM-DD.jsonl.meta.json` |
+| `2026-09-13` onward | `YYYY-MM-DD.jsonl.gz` + `YYYY-MM-DD.jsonl.gz.meta.json` |
+
+A consumer globbing `*.jsonl` therefore gets a **silent partial read** of the
+series — glob both, or `zcat`/`gzip.open` the newer half. Decompress with
+`gzip.open(path, "rt", encoding="utf-8")` (Python) or `zcat` (shell); each
+line is the same JSON object documented above, and the schema is unchanged.
+
+The switch was forced, not stylistic: the snapshot is a full cumulative
+re-dump, so it grew from 0.67 MB (2026-07-10) to 115 MB (2026-09-06) and
+crossed GitHub's 100 MB per-file hard limit, at which point the pre-receive
+hook refused the whole push. Earlier files stay plain and stay published —
+this repo's history is a pre-registration record and is not rewritten. The
+gzip stream is written with `mtime=0` and a fixed internal filename, so two
+exports of identical rows are byte-identical.
+
+The CLI's manual `lab export --paper --out <path>` flow is unaffected and
+still writes plain JSONL — unless you name a path ending in `.gz`, in which
+case it gzips with the same settings.

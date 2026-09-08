@@ -1122,3 +1122,59 @@ the universe, so it is recorded as measured-and-unchanged rather than folded in 
 removing them, which is exactly why the discontinuity is declared in advance and in this much
 detail. A change that quietly increases n is more dangerous to a pre-registered study than one that
 reduces it.
+
+**Addendum 9.28 (2026-09-08).** The 2026-09-06 ledger commitment was committed on time and
+published late. This is a disclosure, not a change to any hypothesis, exclusion rule or statistic.
+
+**What happened.** The weekly replication export (`docs/paper_exports/YYYY-MM-DD.jsonl`, §15's
+"replication export", automated since v2.8) is a full cumulative re-dump of every resolved
+forecast, so it has grown roughly linearly: 0.67 MB on 2026-07-10, 52.7 MB on 08-10, 95.9 MB on
+08-30, and **115.1 MB on 09-06**. GitHub rejects any file over 100 MB with a pre-receive hook, and
+that hook scans **every blob in the pushed range** — so the oversized export inside commit
+`5ae68dc` refused the entire push, taking with it the M7 markets-map commit and, the point of this
+note, the **ledger commitment for 2026-09-06**. `config.yaml` states in as many words that an
+unpushed commitment on a public repo verifies nothing, and §7 of this plan sets the precedent that
+gaps in the commitment record are documented rather than papered over. The value of a
+pre-registration is its timestamp, so the lapse is recorded here: committed 2026-09-06, published
+2026-09-08, cause as above.
+
+The failure was silent for the same structural reason v2.12's ledger-push defect was:
+`gitutil._is_non_fast_forward` matches on the literal `[rejected]` plus a divergence reason, and
+GitHub's `! [remote rejected] … (pre-receive hook declined)` is a different rejection class, so the
+job logged `pushed: false` and returned normally. That is the same "logs it and returns" shape
+recorded three times before in this project; it is named again here rather than treated as new.
+
+**What changes.** From 2026-09-13 the weekly snapshot is written as `YYYY-MM-DD.jsonl.gz` with a
+matching `.jsonl.gz.meta.json`. Measured on the 2026-08-30 export, gzip -9 gives **16.5×**
+(96.1 MB → 5.8 MB), which stays inside the limit through the 2026-12-31 freeze even at the highest
+weekly growth rate yet observed (+30.3 MB over 08-10→08-18). The **dataset is unchanged** — same
+rows, same fields, same query, same manifest; only the container differs, and a test asserts the
+gzip round-trips to exactly the uncompressed row stream. The stream is written with `mtime=0` and a
+fixed internal filename so two exports of identical rows are byte-identical, which §15's
+re-derivability claim requires.
+
+**Everything through 2026-08-30 stays plain `.jsonl` and stays published, unrewritten.** This
+repository's history *is* the pre-registration record; rewriting published commits to tidy a file
+extension would damage the thing the record exists to provide. The consequence is a split series,
+and it is stated in `docs/paper_export_schema.md` with its date because a consumer globbing
+`*.jsonl` would otherwise get a silent partial read.
+
+**Not done, deliberately.** Parquet compresses this data far harder than gzip (~70× on a measured
+sample) and was rejected anyway: it changes the artifact type that §13/§15 committed to and that
+every already-published file embodies, where gzip changes only the container. Git LFS was rejected
+on this project's own 2026-08-25 policy — LFS is for what plain git cannot carry, GitHub never
+garbage-collects LFS objects, and on a public repo every stranger's clone bills the maintainer's
+bandwidth. Incremental exports and any narrowing of the export's row scope were rejected outright:
+the first changes the dataset contract, the second would be a research-population change smuggled
+in as a size fix.
+
+**One defect found while doing this and deliberately left open.** The manifest has no content
+digest — `paper_export_manifest` returns only `{code_version, schema_version, generated_at,
+row_count, fields}` — so a published export is verifiable today only by counting its lines, and
+Phase 15's own acceptance criterion ("the `--paper` export round-trips through a validation
+script") has no such script in the repository. Adding a digest is not a one-line change and must
+not be folded into a size fix: it requires a deterministic sort *inside the paper export only*,
+never in the shared `resolved_forecast_rows`, whose row order feeds an **unstable** `argsort` in the
+per-cluster resolution ordering — so a well-meaning `ORDER BY` there could move the pre-registered
+anytime-valid confidence sequence with no change in data. It is filed here so it is not lost, and
+so that the current, weaker verifiability of the published exports is on the record.

@@ -226,14 +226,36 @@ def export(
                 typer.secho("export --paper requires --out (manifest needs a file path)",
                            fg=typer.colors.RED, err=True)
                 raise typer.Exit(code=2)
+            import gzip
+            import io
+
             from lab.export import export_paper_jsonl, paper_export_manifest
 
-            lines = list(export_paper_jsonl(conn))
-            manifest = paper_export_manifest(conn, len(lines))
-            Path(out).write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            # The scheduled weekly snapshot is gzipped (it outgrew GitHub's
+            # 100MB per-file limit); this manual flow is NOT, unless the
+            # operator asks for it by naming a .gz path. --out is operator-
+            # chosen, and silently gzipping a file called foo.jsonl is a
+            # surprise, not a service.
+            n = 0
+            if str(out).endswith(".gz"):
+                with open(out, "wb") as raw:
+                    with gzip.GzipFile(filename=Path(out).name[:-3], mode="wb",
+                                       fileobj=raw, compresslevel=9, mtime=0) as gz:
+                        with io.TextIOWrapper(gz, encoding="utf-8", newline="\n") as text:
+                            for line in export_paper_jsonl(conn):
+                                text.write(line)
+                                text.write("\n")
+                                n += 1
+            else:
+                with open(out, "w", encoding="utf-8", newline="\n") as fh:
+                    for line in export_paper_jsonl(conn):
+                        fh.write(line)
+                        fh.write("\n")
+                        n += 1
+            manifest = paper_export_manifest(conn, n)
             Path(f"{out}.meta.json").write_text(
                 json.dumps(manifest, indent=2), encoding="utf-8")
-            typer.echo(f"export --paper: {len(lines)} rows -> {out} "
+            typer.echo(f"export --paper: {n} rows -> {out} "
                       f"(manifest: {out}.meta.json, code_version={manifest['code_version']})")
             return
         from lab.export import export_jsonl
