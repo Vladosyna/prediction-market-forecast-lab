@@ -35,12 +35,27 @@ def unresolved_closed_markets(conn, limit: int = 200) -> list[str]:
     NULLs sort first on ASC in SQLite, which is exactly the priority wanted: a
     market never checked yet -- a fresh closure -- goes to the front, while the
     old backlog sweeps steadily behind it rather than blocking it.
+
+    Polymarket only, from 2026-09-08. This query predates multi-venue
+    collection (Phase 10) and was never narrowed, so rows from venues Gamma
+    has never heard of were candidates here: measured 2026-09-08, 961 Manifold
+    and 48 Kalshi against 9,935 Polymarket, i.e. 9.2% of a 200-row cycle spent
+    on ids that cannot resolve. Each costs TWO wasted requests, because
+    `market_by_condition` tries `{condition_ids}` then `{condition_ids,
+    closed:"true"}` before returning None. Both venues have their own watchers.
+
+    The subtler harm was to monitoring: this loop stamps
+    `resolution_checked_ts` unconditionally, so it kept foreign-venue rows
+    looking freshly checked, and `lab status`'s `oldest_check_age_h` -- a MIN
+    over that column -- could report a healthy age produced entirely by Gamma
+    while another venue's watcher sat wedged.
     """
     rows = conn.execute(
         """
         SELECT m.condition_id FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
         WHERE r.condition_id IS NULL
+          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
           AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
         ORDER BY m.resolution_checked_ts ASC
         LIMIT ?
@@ -57,12 +72,22 @@ def resolution_backlog_size(conn) -> int:
     `lab status` used to report only the `closed = 1` half of this (17k of a
     real 42k), which is part of why the stall above went unnoticed for weeks:
     the number on the dashboard was not the number the watcher was working
-    through."""
+    through.
+
+    `venue` is filtered here for the same reason and on the same day the
+    candidate query gained it: this function's entire contract is "the same
+    predicate `unresolved_closed_markets` selects on", and a backlog number
+    that counts 18k markets this watcher will never fetch is the very failure
+    the paragraph above describes. The reported figure therefore drops sharply
+    on 2026-09-08 -- that is the number becoming true, not the backlog
+    draining. Kalshi's own backlog is reported per venue in `lab status`.
+    """
     return conn.execute(
         """
         SELECT COUNT(*) AS n FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
         WHERE r.condition_id IS NULL
+          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
           AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
         """,
         (now_utc_iso(),),

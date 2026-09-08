@@ -12,7 +12,11 @@ from pathlib import Path
 
 from lab.util import PROJECT_ROOT, now_utc_iso
 
-SCHEMA_VERSION = "13"
+# "14" adds kalshi_series_sync (2026-09-08). Additive, so nothing in the §13
+# forecast contract breaks -- but this value is carried in every paper-export
+# manifest, so it is bumped rather than left silently drifting behind the real
+# shape of the database.
+SCHEMA_VERSION = "14"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -631,6 +635,72 @@ def migrate_kalshi_event_clusters(conn: sqlite3.Connection) -> dict[str, int]:
     return {"markets_linked": len(updates), "events": len(events)}
 
 
+def migrate_kalshi_series_cursor(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Idempotent 2026-09-08 migration: give the Kalshi universe sync its own
+    rotation cursor, because it had been inferring one from data it does not
+    always write.
+
+    `_series_sync_order` ordered known series by MAX(last_synced_ts) over that
+    series' market rows -- but `sync_kalshi_universe` fetches
+    `markets_for_series(status="open")` and only upserts what comes back, so a
+    series that returns zero open markets advances nothing. Its key stayed
+    frozen at whatever it was, it stayed the oldest, and Python's stable sort
+    handed back the same head every cycle: with 231 dead series against ~32
+    known slots, the known half of the rotation was not slow, it was fixed.
+    Measured 2026-09-07: median staleness over the 606 series that DO carry
+    open markets was 383 hours against a designed 26, with cycles logging
+    `markets_seen: 0` three hours running.
+
+    A separate table rather than a column on `markets`: writing
+    `last_synced_ts` onto rows the venue did not return would make a column of
+    the §13 forecast contract assert something false. This one records what we
+    ATTEMPTED, which is exactly what a rotation cursor is.
+
+    `consecutive_empty` is recorded, not acted on -- a series that returns
+    nothing for weeks is worth seeing in `lab status`, but skipping it would
+    reintroduce the same class of bug from the other side.
+    """
+    existed = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'kalshi_series_sync'"
+    ).fetchone() is not None
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS kalshi_series_sync (
+          series TEXT PRIMARY KEY,
+          attempted_ts TEXT NOT NULL,
+          markets_seen INTEGER NOT NULL DEFAULT 0,
+          consecutive_empty INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.commit()
+    return {"kalshi_series_sync": not existed}
+
+
+def record_kalshi_series_attempt(conn: sqlite3.Connection, series: str,
+                                 markets_seen: int, ts: str | None = None) -> None:
+    """Stamp one series as attempted. Called for every series the sync walks --
+    success, empty response, or fetch failure alike.
+
+    Unconditional by design, and that is the whole fix: stamping only on a
+    productive walk is what let dead series pin the head of the queue forever.
+    `collect/resolutions.py` learned the identical lesson on 2026-07-25 and its
+    `watch_resolutions` stamps before the fetch for the same reason.
+    """
+    conn.execute(
+        """
+        INSERT INTO kalshi_series_sync (series, attempted_ts, markets_seen, consecutive_empty)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(series) DO UPDATE SET
+          attempted_ts = excluded.attempted_ts,
+          markets_seen = excluded.markets_seen,
+          consecutive_empty = CASE WHEN excluded.markets_seen > 0
+                                   THEN 0 ELSE kalshi_series_sync.consecutive_empty + 1 END
+        """,
+        (series, ts or now_utc_iso(), markets_seen, 0 if markets_seen > 0 else 1),
+    )
+
+
 def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     migrate_multi_venue(conn)
@@ -643,6 +713,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_close_resolved_markets(conn)
     migrate_microstructure_covariates(conn)
     migrate_kalshi_event_clusters(conn)
+    migrate_kalshi_series_cursor(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )

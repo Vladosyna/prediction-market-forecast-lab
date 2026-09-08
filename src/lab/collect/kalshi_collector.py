@@ -148,10 +148,30 @@ def _series_sync_order(conn, candidates: list[tuple[str, str]], max_series: int,
         """
     ).fetchall()
     seen = {r["series"]: r["synced"] for r in rows if r["series"]}
+    # The ROTATION key is our own attempt cursor; the PARTITION key stays
+    # `seen`. They must not be the same thing, and that is the whole subtlety
+    # here (2026-09-08). Ordering by MAX(last_synced_ts) meant a series that
+    # returns no open markets advanced nothing, stayed oldest, and -- Python's
+    # sort being stable -- was handed back at the head of every single cycle:
+    # 231 dead series against ~32 known slots pinned the queue completely, and
+    # the 606 series that actually carry open markets went unvisited for a
+    # measured median of 383 hours against a designed 26.
+    #
+    # Re-keying `seen` itself on attempts would have been the tempting one-line
+    # version and is wrong: membership would then include every series a
+    # discovery slot ever touched, migrating ~10,700 dormant series out of
+    # `unseen` and into `known` -- which is precisely the never-seen-first
+    # rotation this docstring already records shipping and failing.
+    cursor = {
+        r["series"]: r["attempted_ts"]
+        for r in conn.execute("SELECT series, attempted_ts FROM kalshi_series_sync")
+    }
 
     known = [(t, u) for t, u in candidates if t in seen]
     unseen = [(t, u) for t, u in candidates if t not in seen]
-    known.sort(key=lambda tu: seen.get(tu[0]) or "")
+    # Fall back to the old key while the cursor table is still filling, so the
+    # first cycles after deploy stay ordered rather than arbitrary.
+    known.sort(key=lambda tu: cursor.get(tu[0]) or seen.get(tu[0]) or "")
     unseen.sort(key=lambda tu: tu[1] or "", reverse=True)
 
     n_discovery = min(len(unseen), int(max_series * discovery_share))
@@ -181,6 +201,10 @@ async def sync_kalshi_universe(
 
     counts = {"series": 0, "markets_seen": 0, "liquid": 0, "tail": 0, "ignored": 0, "skipped_category": 0}
     series_processed = 0
+    # A cycle that overruns its own 60-minute interval runs late rather than
+    # concurrently (_add_interval_job sets max_instances=1), which would halve
+    # the rotation this cursor restores without anything saying so.
+    cycle_started = now_utc()
 
     # Collect every category's series FIRST, then order the whole set by
     # staleness -- the cap has to be a rotation over all of them, not a cutoff
@@ -213,7 +237,13 @@ async def sync_kalshi_universe(
         except Exception:
             log.warning("kalshi universe: markets fetch failed",
                         extra={"ctx": {"series_ticker": ticker}})
+            # Stamp the failure too. A series we could not reach still has to
+            # rotate to the back, or a persistently failing one rebuilds the
+            # same head-of-queue wedge the cursor exists to prevent.
+            db.record_kalshi_series_attempt(conn, ticker, 0)
+            conn.commit()
             continue
+        db.record_kalshi_series_attempt(conn, ticker, len(markets))
         for m in markets:
             counts["markets_seen"] += 1
             row = kalshi_market_row(m, our_category)
@@ -243,6 +273,7 @@ async def sync_kalshi_universe(
                              (event_id, row["condition_id"]))
         conn.commit()
 
+    counts["cycle_seconds"] = int((now_utc() - cycle_started).total_seconds())
     log.info("kalshi universe sync complete", extra={"ctx": counts})
     return counts
 
@@ -471,12 +502,28 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore,
 
 
 def unresolved_kalshi_markets(conn, limit: int = 200) -> list[dict]:
+    """Least-recently-checked candidates first.
+
+    Carries the identical ORDER BY that `collect/resolutions.py`'s
+    `unresolved_closed_markets` gained on 2026-07-25, and for the identical
+    reason -- read that docstring, it describes this exact failure. `LIMIT`
+    with no ordering hands back the same rows in scan order every cycle, and
+    the head fills with markets that will never settle -- Kalshi rows whose
+    `end_date_iso` went stale in the past while the sync was pinned -- so the
+    watcher re-fetches those forever and never reaches anything behind them.
+    That population is small right now (48 rows on 2026-09-08, and the venue's
+    whole unresolved candidate set is 48) precisely because this watcher HAS
+    been draining; the ordering is here so a wedge cannot form again once the
+    restored sync rotation starts feeding it. NULLs sort first on ASC, which
+    puts a fresh closure ahead of the old backlog for free.
+    """
     rows = conn.execute(
         """
         SELECT m.condition_id, m.venue_native_id FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
         WHERE r.condition_id IS NULL AND m.venue = 'kalshi'
           AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        ORDER BY m.resolution_checked_ts ASC
         LIMIT ?
         """,
         (now_utc_iso(), limit),
@@ -501,6 +548,15 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
     recorded = 0
     for row in unresolved_kalshi_markets(conn, limit=limit):
         condition_id, ticker = row["condition_id"], row["venue_native_id"]
+        # Stamp first, and unconditionally -- the ordering above is only a
+        # round-robin if every candidate rotates, including the ones that fail
+        # to fetch and the ones Kalshi never finalizes. Verbatim the rule
+        # resolutions.py:96-100 states for the Gamma watcher.
+        conn.execute(
+            "UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
+            (now_utc_iso(), condition_id),
+        )
+        conn.commit()
         try:
             m = await kalshi.market(ticker)
         except Exception:

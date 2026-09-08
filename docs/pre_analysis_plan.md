@@ -1033,3 +1033,92 @@ collector that is alive and collecting the wrong markets.
 more days of Kalshi). Both were found by auditing whether the study can still answer its own
 questions, both make the answer worse before they make it better, and both are filed before the
 freeze.
+
+**Addendum 9.27 (2026-09-08).** The Kalshi universe sync's rotation was not slow, it was stalled,
+and had been re-walking the same dead series while the ones carrying live markets went unvisited
+for a measured median of sixteen days. The rotation is repaired today. This is a research-population
+change and is declared before it takes effect.
+
+**The measurement.** 837 Kalshi series are known to this lab; 606 of them carry at least one open
+market. Hours since that series was last synced, over those 606: **p25 209, p50 383, p75 543,
+p90 770, max 1,199**. The configured rotation — `max_series_per_sync: 40` hourly, of which ~32 go
+to known series — implies a **26-hour** worst case. The realized median is **14.7× that**, and
+three consecutive cycles on 2026-09-07 (12:05, 13:05, 14:05 UTC) logged `markets_seen: 0`.
+
+**The mechanism, established in code rather than inferred.** `_series_sync_order` ordered known
+series by `MAX(last_synced_ts)` taken from that series' market rows, but `sync_kalshi_universe`
+fetches `markets_for_series(status="open")` and upserts only what comes back. A series that returns
+no open markets therefore advances nothing at all: its key stays frozen, it remains the oldest, and
+because Python's sort is stable it is handed back at the head of every subsequent cycle. With 231
+dead series against ~32 known slots the known half of the rotation was not merely slow — it was
+**fixed**. The fetch-failure path had the same shape: `continue` with nothing stamped.
+
+**The change.** A dedicated cursor table (`kalshi_series_sync`) records what the sync *attempted*,
+stamped for every series it walks — productive, empty, or failed alike — and the rotation orders on
+that. This is the identical rule `collect/resolutions.py` adopted on 2026-07-25 after the same class
+of wedge, whose own docstring says a candidate must rotate to the back whether or not the fetch
+achieved anything. The cursor deliberately does **not** re-key the known/unseen partition: doing so
+would migrate every discovery-touched series into `known`, growing it from 837 toward the venue's
+11,547 — which is precisely the never-seen-first rotation `_series_sync_order`'s own docstring
+records shipping and failing on 2026-08-10. A test asserts the partition stays derived from the
+markets table alone. `SCHEMA_VERSION` moves 13 → 14 for the added table; the change is additive, so
+nothing in §13's forecast contract breaks, but the value is carried in every paper-export manifest
+and is bumped rather than left drifting.
+
+Two companion defects of the same class are fixed alongside, because restoring the rotation feeds
+both: `unresolved_kalshi_markets` had `LIMIT` with no `ORDER BY` and `watch_kalshi_resolutions`
+stamped nothing, i.e. exactly the head-of-scan wedge the Gamma watcher was cured of in July; and
+`unresolved_closed_markets` had never been narrowed to Polymarket after Phase 10, so it was
+fetching — and stamping `resolution_checked_ts` on — rows from venues Gamma has never heard of.
+
+**Population effects, in order of how much they matter.**
+
+1. **Discovery, and this is the one that matters.** A series unvisited for a median of 383 hours
+   contributes no newly listed market to the universe at all. Those markets are not excluded by any
+   rule in this plan; they were never seen. The size of that omission **cannot be quantified from
+   our own data** — we cannot count what we never observed — which is itself the honest statement
+   to record. From today the worst case is bounded at ~26 hours.
+2. **Re-admission through fresh end dates.** `end_date_iso` freshness gates the hard end-date
+   exclusion in `eligible_market_states`, the guard whose firing on stale dates produced the
+   six-day blackout of 9.17. Measured today the affected population is **48 markets** (39 sports,
+   9 other) and the nightly counter reads 156 — small, and declared anyway, because it is the
+   mechanism rather than the current magnitude that earned 9.17.
+3. **Re-tiering.** `tier` is written only by this sync, and it selects the snapshot round, whether
+   a book is fetched, guardrail 13's freshness bound, shadow-portfolio eligibility, M3's top-K
+   frame and M7's proposal set. Kalshi markets whose tier has been frozen for weeks will move on
+   the changeover date; expect a step change in shadow entries.
+4. **A pre-registered covariate changes staleness, not meaning.** `volume_24h` is frozen verbatim
+   into every forecast row. Its staleness falls from a ~383-hour median to a ~26-hour worst case.
+   It is *not* becoming a true 24-hour figure — no achievable rotation delivers that — and any
+   heterogeneity analysis conditioning on it is discontinuous here.
+5. **Silent horizon re-bucketing.** Current end dates will select different M1/M1.x recalibration
+   curves through the horizon buckets, with no counter firing anywhere.
+6. **Null-control cohort churn.** `null_control_ids` re-draws its seeded sample over the whole
+   sorted eligible pool, so any pool change rotates the forward cohort on that date. Historical
+   scoring is unaffected: `null_control_ids_by_venue` reads membership off the ledger.
+7. **Scoring accrues marginally faster.** Narrowing the Gamma watcher returns 1,009 of its 10,944
+   candidate rows (961 Manifold, 48 Kalshi) to Polymarket — 9.2% of each cycle. The `lab status`
+   backlog figure drops by that amount on the changeover date: **that is the number becoming true,
+   not the backlog draining.**
+
+**Two numbers corrected before they entered this record.** An intermediate analysis put the Gamma
+watcher's foreign-venue pollution at 18,079 rows and the stale-end-date population at 215. Measured
+against the live database on 2026-09-08 they are **1,009** and **48**. The defects are real; those
+magnitudes were not, and the smaller ones are what this addendum asserts.
+
+**What was deliberately not done.** `max_series_per_sync` was not raised in the same change — the
+cursor fix alone restores the designed ~26-hour rotation, and buying below 24 hours is a guardrail-8
+politeness decision that needs the newly measured `cycle_seconds` in hand first; v2.12 held
+`snapshot_concurrency` at 1 through five fixes for exactly this reason. Sports series were not
+deprioritised to buy rotation speed: the sync is the only path by which a Kalshi market enters the
+universe at all, so starving it would starve the pool the null control samples from, and a series
+visited every ~80 hours would ingest only the markets open at that instant — length-biasing the
+placebo toward long-horizon markets, which is 9.17's own reasoning turned on the control itself.
+The discovery half of the rotation is wedged the same way on a key we do not control (unseen series
+ordered by the venue's `last_updated_ts`); fixing it would sweep ~10,700 dormant series and expand
+the universe, so it is recorded as measured-and-unchanged rather than folded in here.
+
+**Direction.** This one cuts the other way from 9.26 and 9.17: it *adds* observations rather than
+removing them, which is exactly why the discontinuity is declared in advance and in this much
+detail. A change that quietly increases n is more dangerous to a pre-registered study than one that
+reduces it.

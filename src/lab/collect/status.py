@@ -243,6 +243,90 @@ def coverage_regressions(conn, day: str | None = None,
     return out
 
 
+def _hours_since(ts: str | None, now: datetime) -> float | None:
+    if not ts:
+        return None
+    d = datetime.fromisoformat(ts)
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return round((now - d).total_seconds() / 3600, 1)
+
+
+def _venue_watcher_health(conn, venue: str, now: datetime) -> dict[str, Any]:
+    """One venue's resolution-watcher backlog, in that watcher's own terms."""
+    stamp = now.isoformat(timespec="seconds")
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS backlog,
+               SUM(CASE WHEN m.resolution_checked_ts IS NULL THEN 1 ELSE 0 END) AS never_checked,
+               MIN(m.resolution_checked_ts) AS oldest
+        FROM markets m
+        LEFT JOIN resolutions r ON r.condition_id = m.condition_id
+        WHERE r.condition_id IS NULL AND m.venue = ?
+          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        """,
+        (venue, stamp),
+    ).fetchone()
+    # Markets still flagged open whose end date has already passed: the direct
+    # signal for the failure PAP 9.11/9.17 record, where a correct end-date
+    # guard fired on end dates a starving sync had left stale. The forecast
+    # pass counts these every night ("skipped markets already past their end
+    # date") and, as 9.17's own closing line says, nothing ever read that
+    # counter. This is that counter, on the dashboard.
+    past_end = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM markets
+        WHERE venue = ? AND active = 1 AND closed = 0
+          AND end_date_iso IS NOT NULL AND end_date_iso < ?
+        """,
+        (venue, stamp),
+    ).fetchone()["n"]
+    return {
+        "watcher_backlog": row["backlog"],
+        "watcher_never_checked": row["never_checked"] or 0,
+        "watcher_oldest_check_age_h": _hours_since(row["oldest"], now),
+        "active_past_end_date": past_end,
+    }
+
+
+def _kalshi_sync_rotation(conn, now: datetime) -> dict[str, Any]:
+    """How far behind the Kalshi universe sync's rotation is, over the series
+    that actually carry open markets.
+
+    Nothing on any dashboard could previously see this: `last_synced_ts` had
+    exactly one reader in the whole codebase -- the sync's own ordering -- so a
+    rotation stalled at a 383-hour median (2026-09-07, against a designed 26)
+    was invisible until someone queried the database by hand.
+    """
+    rows = conn.execute(
+        """
+        SELECT s.attempted_ts AS ts
+        FROM kalshi_series_sync s
+        WHERE EXISTS (
+          SELECT 1 FROM markets m
+          WHERE m.venue = 'kalshi' AND m.active = 1 AND m.closed = 0
+            AND substr(m.venue_native_id, 1, instr(m.venue_native_id || '-', '-') - 1) = s.series
+        )
+        """
+    ).fetchall()
+    ages = sorted(a for a in (_hours_since(r["ts"], now) for r in rows) if a is not None)
+    empty_streak = conn.execute(
+        "SELECT COUNT(*) AS n FROM kalshi_series_sync WHERE consecutive_empty >= 3"
+    ).fetchone()["n"]
+    tracked = conn.execute("SELECT COUNT(*) AS n FROM kalshi_series_sync").fetchone()["n"]
+
+    def q(p: float) -> float | None:
+        return ages[min(len(ages) - 1, int(len(ages) * p))] if ages else None
+
+    return {
+        "series_with_cursor": tracked,
+        "live_series_measured": len(ages),
+        "age_h_p50": q(0.5), "age_h_p90": q(0.9),
+        "age_h_max": ages[-1] if ages else None,
+        "series_empty_3plus": empty_streak,
+    }
+
+
 def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     now = now_utc()
     conn = dbmod.connect(config["storage"]["db_path"])
@@ -320,6 +404,7 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
         SELECT MIN(m.resolution_checked_ts) AS t FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
         WHERE r.condition_id IS NULL AND m.resolution_checked_ts IS NOT NULL
+          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
           AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
         """,
         (now.isoformat(timespec="seconds"),),
@@ -329,6 +414,7 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
         SELECT COUNT(*) AS n FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
         WHERE r.condition_id IS NULL AND m.resolution_checked_ts IS NULL
+          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
           AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
         """,
         (now.isoformat(timespec="seconds"),),
@@ -339,11 +425,18 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     out["memory_budget"] = memory_budget()
 
     out["resolution_watcher"] = {
+        # Polymarket-scoped from 2026-09-08, matching the watcher this block
+        # describes -- `resolution_backlog_size` and the candidate query it
+        # mirrors were narrowed to that venue the same day, and a "backlog"
+        # counting 18k Kalshi rows this watcher never fetches is precisely the
+        # dashboard-number-is-not-the-working-set failure the comment above
+        # records. Kalshi's own figures are under out["venues"]["kalshi"].
         "closed_unresolved": conn.execute(
             """
             SELECT COUNT(*) AS n FROM markets m
             LEFT JOIN resolutions r ON r.condition_id = m.condition_id
             WHERE m.closed = 1 AND r.condition_id IS NULL
+              AND COALESCE(m.venue, 'polymarket') = 'polymarket'
             """
         ).fetchone()["n"],
         "backlog": resolution_backlog_size(conn),
@@ -396,6 +489,15 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
             "markets": markets_n, "resolutions": resolutions_n,
             "closed_unresolved": closed_unresolved,
         }
+        if venue == "kalshi":
+            # This venue has its OWN resolution watcher, and until 2026-09-08
+            # the Gamma watcher was stamping resolution_checked_ts on Kalshi
+            # rows it could never resolve -- so the one global
+            # `oldest_check_age_h` above could look healthy on Gamma's stamps
+            # while this watcher sat wedged. A per-venue number is the only
+            # one that can catch that.
+            entry.update(_venue_watcher_health(conn, venue, now))
+            entry["sync_rotation"] = _kalshi_sync_rotation(conn, now)
         if venue in ("kalshi", "metaculus"):
             # Two days, not seven: this is "how stale is the newest snapshot",
             # a question the last partitions answer completely. A venue silent
@@ -443,7 +545,7 @@ def format_status(status: dict[str, Any]) -> str:
         )
     rw = status["resolution_watcher"]
     lines.append(
-        f"  resolution watcher: backlog={rw['backlog']} "
+        f"  resolution watcher [polymarket]: backlog={rw['backlog']} "
         f"(closed={rw['closed_unresolved']}, never_checked={rw['never_checked']}) "
         f"oldest_check={rw['oldest_check_age_h']}h"
     )
@@ -459,6 +561,20 @@ def format_status(status: dict[str, Any]) -> str:
             lines.append(
                 f"  [{venue}] markets={v['markets']} resolutions={v['resolutions']} "
                 f"closed_unresolved={v['closed_unresolved']} (no snapshot loop -- guardrail 16)"
+            )
+        if "watcher_backlog" in v:
+            lines.append(
+                f"       watcher: backlog={v['watcher_backlog']} "
+                f"never_checked={v['watcher_never_checked']} "
+                f"oldest_check={v['watcher_oldest_check_age_h']}h "
+                f"active_past_end={v['active_past_end_date']}"
+            )
+        sr = v.get("sync_rotation")
+        if sr:
+            lines.append(
+                f"       sync rotation: {sr['live_series_measured']} live series, "
+                f"age_h p50={sr['age_h_p50']} p90={sr['age_h_p90']} max={sr['age_h_max']} "
+                f"(cursor rows={sr['series_with_cursor']}, empty3+={sr['series_empty_3plus']})"
             )
     mb = status.get("memory_budget")
     if mb:
