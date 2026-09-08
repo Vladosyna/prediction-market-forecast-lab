@@ -1178,3 +1178,57 @@ never in the shared `resolved_forecast_rows`, whose row order feeds an **unstabl
 per-cluster resolution ordering — so a well-meaning `ORDER BY` there could move the pre-registered
 anytime-valid confidence sequence with no change in data. It is filed here so it is not lost, and
 so that the current, weaker verifiability of the published exports is on the record.
+
+**Addendum 9.29 (2026-09-08).** The other half of the Kalshi rotation is unwedged today, and it
+expands the observed universe. Filed separately from 9.27 because that was a defect fix and this is
+a choice, taken with the numbers 9.27's own instrumentation produced.
+
+**What was wrong.** 9.27 repaired the ordering of *known* series. The discovery slice — 20% of each
+cycle, reserved for series we have never seen — was wedged the same way on a key we do not own:
+unseen series were ordered by the venue's `last_updated_ts` alone, so a series that yielded nothing
+kept whatever position that key gave it forever and the slice re-walked the same head every cycle.
+The pool it exists to sweep is ~10,700 series (Kalshi lists 11,564; 837 are known to us). The
+attempt cursor now orders that half too: never-attempted series first, keeping their recency
+ordering among themselves; already-walked ones rotate to the back.
+
+**Why this needs an addendum when 9.27's half arguably did not.** No configured policy changes —
+the 20% discovery budget, the category map, the exclusions and the tiering thresholds are all
+untouched, and this only makes an existing allocation function. But the *effect* is that markets
+which were never observed will now be observed, and a pre-registered study does not get to call
+that a mere bug fix. **The universe grows, gradually, from today.**
+
+**Scale, so the growth is not mistaken later for a data anomaly.** With `max_series_per_sync` at
+48 (below), 9 discovery slots per hourly cycle sweep ~10,700 unseen series in roughly **50 days** —
+so the first full pass completes near the end of October, against a 2026-12-31 freeze. Most of that
+pool is dormant: this venue lists ~10,500 series against the ~285 that were carrying open markets
+when the rotation was first studied, so the great majority of those cycles will return nothing.
+Newly discovered markets are forward-only by construction — they receive forecasts from their
+discovery date and are never backfilled — so any time-trend analysis must treat discovery date as a
+covariate rather than assume a stationary population.
+
+**`max_series_per_sync` 40 → 48**, in the same change and stated as its own decision. This is a
+guardrail-8 politeness question, not a defect, and it was deliberately not folded into 9.27 —
+v2.12 held `snapshot_concurrency` at 1 through five consecutive fixes for exactly this reason. It
+is taken now because 9.27's new `cycle_seconds` counter answered the only open question: the first
+measured cycle completed 40 series in **61 seconds** against a 3,600-second interval, so runtime
+was never the binding constraint. 48 gives ~39 known slots, i.e. a **~21.5-hour** worst-case
+rotation over 837 known series instead of ~26. In request terms this is 48 an hour, about 0.013
+req/s against a ceiling of 8 — the limiter cannot notice.
+
+**A third, smaller correction, and it moves 9.27's own arithmetic.** The first post-fix cycle
+logged `series: 40` but stamped only **33** distinct series: a series returned under more than one
+configured category appeared twice in the candidate list and was fetched twice. So the cap was
+budgeting *slots*, not series, and the "~26-hour rotation" 9.27 asserts was really ~31. Candidates
+are now deduplicated before partitioning, which restores the arithmetic that addendum states.
+
+**What to watch, named in advance.** The snapshot round is the constraint this touches: the Kalshi
+tail is 4,551 markets and ~15–27 minutes against a 30-minute interval after 9.26, and newly
+discovered non-sports markets add to it. 9.26's filter protects against a repeat of the sports
+flood — unsampled sports are never snapshotted whatever discovery finds — but a large economics or
+politics discovery could still crowd the round, and the coverage watchdog plus the new sync-rotation
+line in `lab status` are where that would show.
+
+**Direction.** Like 9.27 and unlike 9.26, this one adds observations. That is the direction that
+deserves more suspicion, not less, in a study whose claims rest on a pre-registered population —
+hence the scale estimate, the completion date, and the forward-only caveat stated here rather than
+discovered in the data later.

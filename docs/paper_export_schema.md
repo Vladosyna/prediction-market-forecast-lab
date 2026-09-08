@@ -29,7 +29,7 @@ else needs redacting.
 | `condition_id` | string | Market key (synthesized `{venue}:{native_id}` for non-Polymarket rows). |
 | `venue` | string | `polymarket`, `kalshi`, `metaculus`, `manifold`. |
 | `category` | string | Internal taxonomy category (`data/categories.yaml`). |
-| `tier` | string | `liquid`, `tail`, or `ignored` at forecast time. |
+| `tier` | string | `liquid`, `tail`, or `ignored` **as recorded in the `markets` table when the export ran** — not at forecast time. Tiering is rewritten by every universe sync and the forecast row does not freeze it, so a market re-tiered after its forecast exports under the newer value. (Corrected 2026-09-08; this line previously said "at forecast time", which the join does not support.) |
 | `model_id` | string | Forecaster identity, e.g. `m0_market`, `m1_hier@kalshi`, `m3_evidence@deepseek`. |
 | `forecast_ts` | string (ISO 8601 UTC) | When this forecast was frozen in the ledger. |
 | `p_yes` | float (0,1) | The model's forecast probability. |
@@ -53,7 +53,22 @@ else needs redacting.
 | `schema_version` | The database schema version (`meta.schema_version`) at export time. |
 | `generated_at` | ISO 8601 UTC timestamp of the export run. |
 | `row_count` | Number of rows in the JSONL file. |
+| `rows_sha256` | **Present from 2026-09-08 only.** sha256 over the newline-joined canonical rows — each row as sorted-key compact JSON, the same convention `docs/ledger_commitments.jsonl` uses. Verify with `python scripts/verify_paper_export.py <path>`. The exports published 2026-07-10 … 2026-08-30 carry no such field and are checkable only by line count; the verifier says so out loud rather than passing quietly. |
 | `fields` | The exact field list above, for a quick sanity check against this document. |
+
+**What the digest proves, and what it does not.** It proves the file is the file
+that was written. It does **not** prove the rows are immutable: `event_id`,
+`tier` and `category` are re-derived from the live `markets` table on every
+dump, so two exports a week apart can legitimately differ on rows whose
+forecasts never moved. Immutability of the forecast ledger itself is what
+`docs/ledger_commitments.jsonl` attests — this manifest is a provenance record
+for one artifact, not a second ledger.
+
+Row order is deterministic from the same date (models in name order, rows
+within a model by their own canonical serialisation), which is what makes the
+digest reproducible. That ordering deliberately lives in the export alone and
+not in the shared `eval/run.py::resolved_forecast_rows` query — see that
+function's callers before adding an `ORDER BY` there.
 
 ## Automated weekly snapshot
 

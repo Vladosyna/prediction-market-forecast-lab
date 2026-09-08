@@ -184,7 +184,17 @@ def _series_sync_order(conn, candidates: list[tuple[str, str]], max_series: int,
     # Fall back to the old key while the cursor table is still filling, so the
     # first cycles after deploy stay ordered rather than arbitrary.
     known.sort(key=lambda tu: cursor.get(tu[0]) or seen.get(tu[0]) or "")
+    # The discovery half was wedged the same way, on a key we do not own
+    # (2026-09-08, PAP 9.29). Ordering unseen series by the venue's
+    # `last_updated_ts` alone means a series that yields nothing keeps whatever
+    # position that key gives it forever, so the discovery slice re-walked the
+    # same head every cycle and never reached the pool it exists to sweep.
+    # Two passes, relying on sort stability: venue recency first, then the
+    # attempt cursor -- never-attempted series (absent from the cursor, so "")
+    # stay ahead of already-walked ones and keep their recency ordering among
+    # themselves, while a walked-and-empty series rotates to the back.
     unseen.sort(key=lambda tu: tu[1] or "", reverse=True)
+    unseen.sort(key=lambda tu: cursor.get(tu[0]) or "")
 
     n_discovery = min(len(unseen), int(max_series * discovery_share))
     n_known = min(len(known), max_series - n_discovery)

@@ -70,7 +70,7 @@ def paper_export_paths(config: dict[str, Any], dt=None) -> tuple[Path, Path]:
 
 def write_paper_export(conn, config: dict[str, Any]) -> dict[str, Any]:
     """Write today's dated .jsonl.gz + manifest; no-op if they already exist."""
-    from lab.export import export_paper_jsonl, paper_export_manifest
+    from lab.export import paper_export_manifest, write_paper_export_stream
 
     gz_path, meta_path = paper_export_paths(config)
     # The legacy sibling matters exactly once, on the deploy's own calendar
@@ -83,6 +83,7 @@ def write_paper_export(conn, config: dict[str, Any]) -> dict[str, Any]:
     gz_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = gz_path.with_name(gz_path.name + ".tmp")
     row_count = 0
+    rows_sha256 = None
     try:
         # Streamed, not materialised: the row set is already ~700k lines and
         # only grows. mtime=0 and an explicit filename make two exports of the
@@ -93,10 +94,7 @@ def write_paper_export(conn, config: dict[str, Any]) -> dict[str, Any]:
             with gzip.GzipFile(filename=gz_path.name[:-3], mode="wb",
                                fileobj=raw, compresslevel=9, mtime=0) as gz:
                 with io.TextIOWrapper(gz, encoding="utf-8", newline="\n") as text:
-                    for line in export_paper_jsonl(conn):
-                        text.write(line)
-                        text.write("\n")
-                        row_count += 1
+                    row_count, rows_sha256 = write_paper_export_stream(conn, text)
 
         # Built BEFORE the rename, deliberately. code_version() hashes every
         # src/lab/*.py plus config.yaml; if it raised after the payload was in
@@ -104,7 +102,7 @@ def write_paper_export(conn, config: dict[str, Any]) -> dict[str, Any]:
         # it, and the exists() gate above would then treat that date as done
         # forever -- breaking the two-file contract docs/paper_export_schema.md
         # states to reviewers.
-        manifest = paper_export_manifest(conn, row_count)
+        manifest = paper_export_manifest(conn, row_count, rows_sha256)
         tmp_path.replace(gz_path)
         meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     except BaseException:

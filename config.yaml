@@ -494,7 +494,15 @@ venues:
     # rule as Polymarket (brief section 3 universe policy): these are 15-min
     # crypto price-target markets, the market price IS the forecast.
     excluded_series_categories: ["Crypto", "Financials"]
-    max_series_per_sync: 40   # bounds per-cycle series fan-out (politeness + runtime)
+    # Bounds per-cycle series fan-out (politeness + runtime). 40 -> 48 on
+    # 2026-09-08, a deliberate choice rather than a defect fix, taken only once
+    # the cursor of PAP 9.27 had produced a measured cycle: 40 series completed
+    # in 61 seconds against a 3600-second interval, so runtime was never the
+    # binding constraint. 48 gives ~39 known slots a cycle over 837 known
+    # series, i.e. a ~21.5-hour worst-case rotation instead of ~26. In request
+    # terms this is 48/hour, about 0.013 req/s against guardrail 8's ceiling of
+    # 8 -- the limiter is untouched and could not notice the difference.
+    max_series_per_sync: 48
     # Rekeyed 2026-08-09 off Kalshi's own `liquidity_dollars`, which reads 0.0
     # for every market it publishes (verified across all 4,822 collected and
     # against a live API sample) -- so the liquid gate could never be met and

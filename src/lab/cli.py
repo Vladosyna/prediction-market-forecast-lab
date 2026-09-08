@@ -229,30 +229,23 @@ def export(
             import gzip
             import io
 
-            from lab.export import export_paper_jsonl, paper_export_manifest
+            from lab.export import paper_export_manifest, write_paper_export_stream
 
             # The scheduled weekly snapshot is gzipped (it outgrew GitHub's
             # 100MB per-file limit); this manual flow is NOT, unless the
             # operator asks for it by naming a .gz path. --out is operator-
             # chosen, and silently gzipping a file called foo.jsonl is a
             # surprise, not a service.
-            n = 0
             if str(out).endswith(".gz"):
                 with open(out, "wb") as raw:
                     with gzip.GzipFile(filename=Path(out).name[:-3], mode="wb",
                                        fileobj=raw, compresslevel=9, mtime=0) as gz:
                         with io.TextIOWrapper(gz, encoding="utf-8", newline="\n") as text:
-                            for line in export_paper_jsonl(conn):
-                                text.write(line)
-                                text.write("\n")
-                                n += 1
+                            n, rows_sha256 = write_paper_export_stream(conn, text)
             else:
                 with open(out, "w", encoding="utf-8", newline="\n") as fh:
-                    for line in export_paper_jsonl(conn):
-                        fh.write(line)
-                        fh.write("\n")
-                        n += 1
-            manifest = paper_export_manifest(conn, n)
+                    n, rows_sha256 = write_paper_export_stream(conn, fh)
+            manifest = paper_export_manifest(conn, n, rows_sha256)
             Path(f"{out}.meta.json").write_text(
                 json.dumps(manifest, indent=2), encoding="utf-8")
             typer.echo(f"export --paper: {n} rows -> {out} "

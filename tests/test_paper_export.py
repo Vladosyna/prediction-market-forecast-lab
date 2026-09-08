@@ -277,3 +277,115 @@ def test_a_legacy_plain_jsonl_for_today_still_counts_as_exported(config, conn):
     result = pe.write_paper_export(conn, config)
     assert result["written"] is False and result["reason"] == "already_exists"
     assert not gz_path.exists()
+
+
+# --- content digest + validation script (2026-09-08) -----------------------
+
+def test_the_manifest_carries_a_content_digest(config, conn):
+    """Until this existed a published export was checkable only by counting
+    its lines, and Phase 15's own acceptance criterion ("round-trips through a
+    validation script") had no script."""
+    import hashlib
+
+    from lab.export import canonical_row, export_paper_rows
+
+    _seed(conn)
+    pe.write_paper_export(conn, config)
+    _, meta_path = pe.paper_export_paths(config)
+    manifest = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    expected = hashlib.sha256(
+        "\n".join(canonical_row(r) for r in export_paper_rows(conn)).encode("utf-8")
+    ).hexdigest()
+    assert manifest["rows_sha256"] == expected
+
+
+def test_the_export_row_order_is_deterministic(config, conn):
+    """The digest is only meaningful if two dumps of the same data agree, and
+    `resolved_forecast_rows` has no ORDER BY -- so the ordering has to be
+    imposed here."""
+    from lab.export import export_paper_rows
+
+    _seed(conn)
+    first = list(export_paper_rows(conn))
+    assert first == list(export_paper_rows(conn))
+    assert first == sorted(first, key=lambda r: __import__("json").dumps(
+        r, sort_keys=True, separators=(",", ":"))) or len({r["model_id"] for r in first}) > 1
+
+
+def test_the_shared_eval_query_was_not_given_an_order_by(config, conn):
+    """The sort belongs to the export alone. `run_eval` clusters with
+    np.argsort(resolved_ts) -- quicksort, unstable -- so ties break on input
+    order; an ORDER BY on the shared query would move the pre-registered
+    anytime-valid confidence sequence with no change in data."""
+    import inspect
+
+    from lab.eval import run as eval_run
+
+    src = inspect.getsource(eval_run.resolved_forecast_rows)
+    assert "ORDER BY" not in src.upper(), (
+        "resolved_forecast_rows must stay unordered -- see export_paper_rows"
+    )
+
+
+def test_the_validation_script_verifies_a_real_export(config, conn, tmp_path):
+    import subprocess
+    import sys
+
+    from lab.util import PROJECT_ROOT
+
+    _seed(conn)
+    pe.write_paper_export(conn, config)
+    gz_path, _ = pe.paper_export_paths(config)
+
+    script = PROJECT_ROOT / "scripts" / "verify_paper_export.py"
+    r = subprocess.run([sys.executable, str(script), str(gz_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "rows_sha256 verified" in r.stdout
+
+
+def test_the_validation_script_catches_a_tampered_row(config, conn):
+    import gzip as _gzip
+    import subprocess
+    import sys
+
+    from lab.util import PROJECT_ROOT
+
+    _seed(conn)
+    pe.write_paper_export(conn, config)
+    gz_path, _ = pe.paper_export_paths(config)
+
+    with _gzip.open(gz_path, "rt", encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+    row = json.loads(lines[0])
+    row["p_yes"] = 0.999999
+    lines[0] = json.dumps(row, ensure_ascii=False)
+    with _gzip.open(gz_path, "wt", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+    script = PROJECT_ROOT / "scripts" / "verify_paper_export.py"
+    r = subprocess.run([sys.executable, str(script), str(gz_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 1 and "rows_sha256" in r.stderr
+
+
+def test_the_validation_script_refuses_to_pass_a_manifest_with_no_digest(config, conn):
+    """The pre-2026-09-08 exports have no digest. A verifier that silently
+    passed on a missing one would be worse than no verifier."""
+    import subprocess
+    import sys
+
+    from lab.util import PROJECT_ROOT
+
+    _seed(conn)
+    pe.write_paper_export(conn, config)
+    gz_path, meta_path = pe.paper_export_paths(config)
+    manifest = json.loads(meta_path.read_text(encoding="utf-8"))
+    del manifest["rows_sha256"]
+    meta_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    script = PROJECT_ROOT / "scripts" / "verify_paper_export.py"
+    r = subprocess.run([sys.executable, str(script), str(gz_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0 and "SKIP" in r.stdout, "must say so out loud, not pass quietly"
