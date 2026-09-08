@@ -140,6 +140,18 @@ def _series_sync_order(conn, candidates: list[tuple[str, str]], max_series: int,
     """
     if not candidates:
         return []
+    # Deduplicate first, or the cap budgets slots rather than series. Measured
+    # on the first cycle after the cursor shipped (2026-09-08): 40 series were
+    # walked and only 33 distinct ones reached the cursor table, so ~17% of an
+    # hourly budget went on fetching the same series twice -- and the rotation
+    # arithmetic that justifies a ~26-hour worst case silently assumed 40.
+    # Duplicates arise because the candidate list is accumulated across every
+    # configured category and a series can be returned by more than one.
+    _first_seen: dict[str, str | None] = {}
+    for _t, _u in candidates:
+        if _t not in _first_seen:
+            _first_seen[_t] = _u
+    candidates = list(_first_seen.items())
     rows = conn.execute(
         """
         SELECT substr(venue_native_id, 1, instr(venue_native_id || '-', '-') - 1) AS series,

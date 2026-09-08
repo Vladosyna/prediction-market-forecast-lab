@@ -222,3 +222,17 @@ def test_the_gamma_watcher_no_longer_claims_kalshi_rows(conn):
     assert resolution_backlog_size(conn) == 1, (
         "the backlog number must describe the working set of the watcher it names"
     )
+
+
+def test_the_cap_budgets_distinct_series_not_slots(conn):
+    """Measured on the first live cycle after the cursor shipped: 40 series
+    walked, 33 distinct ones stamped -- a series returned under more than one
+    configured category was fetched twice, spending ~17% of an hourly budget
+    on nothing and quietly making the rotation slower than the arithmetic that
+    justifies it."""
+    _seed(conn, "A-T1", synced="2026-01-01T00:00:00+00:00")
+    _seed(conn, "B-T1", synced="2026-02-01T00:00:00+00:00")
+    conn.commit()
+    order = _series_sync_order(
+        conn, [("A", None), ("B", None), ("A", None), ("B", None)], max_series=4)
+    assert order == ["A", "B"], "each series at most once per cycle"
