@@ -113,17 +113,28 @@ def extract_final_payout(m: GammaMarket) -> tuple[float, bool] | None:
 async def watch_resolutions(gamma: GammaClient, conn, limit: int = 200) -> int:
     """One poll round. Returns number of resolutions recorded."""
     recorded = 0
-    for condition_id in unresolved_closed_markets(conn, limit=limit):
-        # Stamp first, and unconditionally. A market whose fetch fails, or one
-        # Gamma simply never finalizes, still has to rotate to the back of the
-        # queue -- stamping only on success would rebuild the same head-of-scan
-        # wedge the ordering exists to prevent, just with a different
-        # population sitting in the head.
-        conn.execute(
-            "UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
-            (now_utc_iso(), condition_id),
-        )
-        conn.commit()
+    candidates = unresolved_closed_markets(conn, limit=limit)
+    if not candidates:
+        return 0
+    # Stamp the whole batch first, in ONE transaction, and unconditionally. A
+    # market whose fetch fails, or one Gamma simply never finalizes, still has
+    # to rotate to the back of the queue -- stamping only on success would
+    # rebuild the same head-of-scan wedge the ordering exists to prevent.
+    #
+    # One transaction rather than one per candidate (2026-09-09): the per-row
+    # form issued 200 separate write transactions per cycle, each a fresh
+    # chance to collide with a long-running writer, and lock errors went from
+    # 5-8 a day to 98 the day a second watcher started doing the same thing.
+    # Batching also strengthens the guarantee -- every candidate is rotated
+    # before ANY of them is fetched, so a mid-cycle crash cannot leave the
+    # head of the queue unrotated.
+    stamp = now_utc_iso()
+    conn.executemany(
+        "UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
+        [(stamp, cid) for cid in candidates],
+    )
+    conn.commit()
+    for condition_id in candidates:
         try:
             m = await gamma.market_by_condition(condition_id)
         except Exception:

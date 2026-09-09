@@ -236,3 +236,40 @@ def test_the_cap_budgets_distinct_series_not_slots(conn):
     order = _series_sync_order(
         conn, [("A", None), ("B", None), ("A", None), ("B", None)], max_series=4)
     assert order == ["A", "B"], "each series at most once per cycle"
+
+
+def test_the_watchers_stamp_a_batch_in_one_transaction(conn):
+    """Per-row commits took database-lock errors from 5-8 a day to 98 on
+    2026-09-09, the day a second watcher started issuing 200 write
+    transactions a cycle. Batching also strengthens the round-robin: every
+    candidate is rotated before ANY of them is fetched, so a mid-cycle crash
+    cannot leave the head of the queue unrotated."""
+    past = "2026-01-01T00:00:00+00:00"
+    cids = [_seed(conn, f"S{i}-T1", end_date=past) for i in range(5)]
+    conn.commit()
+
+    class _CountingConn:
+        """sqlite3.Connection.commit is read-only, so count through a proxy."""
+
+        def __init__(self, inner):
+            self._inner = inner
+            self.commits = 0
+
+        def commit(self):
+            self.commits += 1
+            return self._inner.commit()
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    class _Boom:
+        async def market(self, ticker):
+            raise RuntimeError("every fetch fails")
+
+    proxy = _CountingConn(conn)
+    assert asyncio.run(watch_kalshi_resolutions(_Boom(), proxy)) == 0
+    assert proxy.commits == 1, "one stamping transaction, not one per candidate"
+    stamped = conn.execute(
+        "SELECT COUNT(*) FROM markets WHERE resolution_checked_ts IS NOT NULL"
+    ).fetchone()[0]
+    assert stamped == len(cids), "every candidate rotates even when every fetch fails"

@@ -273,6 +273,17 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
                 event_leg_ids.append(effective.condition_id)
         if ev.neg_risk and len(event_leg_ids) >= 2:
             _link_negrisk_legs(conn, event_leg_ids, title=ev.slug)
+        # Bounded transactions, not one for the whole universe (2026-09-09).
+        # A single commit at the end held one write lock across every upsert in
+        # the sync -- thousands of them -- and SQLite allows exactly one
+        # writer, so every other job that wanted to write during that window
+        # queued behind it and gave up at `busy_timeout`. That is the same
+        # reasoning that put a 250-row batch into `run_forecasts` on
+        # 2026-08-25; this call site never got it. Committing per event keeps
+        # each transaction to one event's legs and leaves the sync just as
+        # restartable -- upserts are idempotent, so a partial sync is a
+        # prefix, not a corruption.
+        conn.commit()
     conn.commit()
     log.info("universe sync complete", extra={"ctx": counts})
     return counts

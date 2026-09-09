@@ -293,6 +293,13 @@ async def sync_kalshi_universe(
                 )
                 conn.execute("UPDATE markets SET event_id = ? WHERE condition_id = ?",
                              (event_id, row["condition_id"]))
+            # Bound the transaction inside a series too, not just between
+            # series (2026-09-09). Series are not small any more -- the
+            # football season put 1,000 markets in KXCYCLINGSTAGE alone -- and
+            # one write lock held across a thousand upserts is what the other
+            # collector jobs were timing out behind.
+            if counts["markets_seen"] % 200 == 0:
+                conn.commit()
         conn.commit()
 
     counts["cycle_seconds"] = int((now_utc() - cycle_started).total_seconds())
@@ -568,17 +575,23 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
     """One poll round over unresolved Kalshi markets already in our DB. Returns
     number of resolutions recorded. Mirrors collect/resolutions.py's pattern."""
     recorded = 0
-    for row in unresolved_kalshi_markets(conn, limit=limit):
+    candidates = unresolved_kalshi_markets(conn, limit=limit)
+    if not candidates:
+        return 0
+    # Stamp the whole batch first, unconditionally, in one transaction -- the
+    # ordering above is only a round-robin if every candidate rotates,
+    # including the ones that fail to fetch and the ones Kalshi never
+    # finalizes. Same rule and same batching as the Gamma watcher, and the
+    # batching is not cosmetic: this loop's per-row commits, added on
+    # 2026-09-08, took database-lock errors from 5-8 a day to 98.
+    stamp = now_utc_iso()
+    conn.executemany(
+        "UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
+        [(stamp, r["condition_id"]) for r in candidates],
+    )
+    conn.commit()
+    for row in candidates:
         condition_id, ticker = row["condition_id"], row["venue_native_id"]
-        # Stamp first, and unconditionally -- the ordering above is only a
-        # round-robin if every candidate rotates, including the ones that fail
-        # to fetch and the ones Kalshi never finalizes. Verbatim the rule
-        # resolutions.py:96-100 states for the Gamma watcher.
-        conn.execute(
-            "UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
-            (now_utc_iso(), condition_id),
-        )
-        conn.commit()
         try:
             m = await kalshi.market(ticker)
         except Exception:
