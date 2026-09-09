@@ -2026,130 +2026,105 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-09-03T07:44:50+00:00'
-proposed:
 - condition_id: '0xe1d5733322fd2215f136412f419d9ff805d097f78c68de3261515ff736895f2b'
   question: Will Eduardo Bolsonaro win the 2026 Brazilian presidential election?
   venue: kalshi
   external_id: KXBRPRES-26-EBOL
   external_question: Will Eduardo Bolsonaro win the 2026 Brazilian presidential election?
-  rationale: 'Both markets concern identical event and outcome: whether Eduardo Bolsonaro
-    wins the 2026 Brazilian presidential election. Polymarket''s criteria explicitly
-    resolve based on the listed candidate winning the election, and this specific
-    market is leg for Eduardo Bolsonaro. Kalshi''s specific outcome (from ticker and
-    labels) is exactly ''Eduardo Bolsonaro wins''. Both reference the same election
-    cycle and the potential runoff, and resolution criteria are substantively aligned.
-    Minor differences in phrasing (e.g., consensus vs official results) do not alter
-    the resolved outcome.'
-  confidence: 0.98
-  proposed_ts: '2026-09-04T15:02:53+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-07T14:20:58+00:00'
 - condition_id: '0xa59bb6bb91e5c1e4d533864520fbd3bb75d6d0ebb813b4cd8a8b88479bfa8966'
   question: "Will Carlos Roberto Massa J\xFAnior win the 2026 Brazilian presidential\
     \ election?"
   venue: kalshi
   external_id: KXBRPRES-26-RJUN
   external_question: "Will Ratinho J\xFAnior win the 2026 Brazilian presidential election?"
-  rationale: "Both markets refer to the same candidate Carlos Roberto Massa J\xFA\
-    nior, commonly known as Ratinho J\xFAnior, winning the 2026 Brazilian presidential\
-    \ election. The Polymarket question names the full legal name while the Kalshi\
-    \ market uses the common nickname in its title and outcome, with the ticker suffix\
-    \ 'RJUN' confirming the same person. Both resolution criteria rely on the official\
-    \ winner of the 2026 election. A minor note: Polymarket's criteria mention potential\
-    \ second round and long-tail resolution timing, but those do not alter the core\
-    \ outcome being identical. The only small uncertainty comes from possible alias\
-    \ ambiguity, but the ticker and context make the match highly reliable."
-  confidence: 0.95
-  proposed_ts: '2026-09-04T15:02:55+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-09-07T14:21:00+00:00'
 - condition_id: '0xdd3d104667774208eae2239f576122ecdd1c04ba81cc14d26d22a36b33887977'
   question: Will Fernando Haddad win the 2026 Brazilian presidential election?
   venue: kalshi
   external_id: KXBRPRES-26-FH
   external_question: Will Fernando Haddad win the 2026 Brazilian presidential election?
-  rationale: Both markets ask whether Fernando Haddad will win the 2026 Brazilian
-    presidential election, with identical outcome (Yes/Haddad wins) and consistent
-    resolution timing (including potential second round and official TSE results as
-    authority). The Polymarket leg and Kalshi market are exact equivalents.
-  confidence: 1.0
-  proposed_ts: '2026-09-04T15:02:56+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-09-07T14:21:03+00:00'
 - condition_id: '0xafd3f96b7b6084509e625270538ff0699003fafc042263c1216e7f084cef753a'
   question: Will Aldo Rebelo win the 2026 Brazilian presidential election?
   venue: kalshi
   external_id: KXBRPRES-26-AREB
   external_question: Will Aldo Rebelo win the 2026 Brazilian presidential election?
-  rationale: Both markets specifically ask whether Aldo Rebelo will win the 2026 Brazilian
-    presidential election, with the same real-world event and resolution based on
-    official election results. The Polymarket question and criteria are aligned with
-    the Kalshi specific outcome (Aldo Rebelo wins). The only minor differences are
-    phrasing and possible second-round inclusion, but both ultimately resolve on Rebelo
-    winning the presidency via official/credible results.
-  confidence: 0.95
-  proposed_ts: '2026-09-04T15:02:58+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-09-07T14:21:05+00:00'
 - condition_id: '0x63d8f3a34c90bd5342dda8acf62b6a898dfa52f86475efaf180b66493ef6af80'
   question: Will Jair Bolsonaro win the 2026 Brazilian presidential election?
   venue: kalshi
   external_id: KXBRPRES-26-JB
   external_question: Will Jair Bolsonaro win the 2026 Brazilian presidential election?
-  rationale: Both the Polymarket question and Kalshi market (KXBRPRES-26-JB) specifically
-    ask whether Jair Bolsonaro will win the 2026 Brazilian presidential election.
-    The resolution criteria for both reference the same event and same winner-based
-    outcome. Polymarket mentions the official Brazilian electoral court as arbiter;
-    Kalshi's criteria match the straightforward winner condition. No material conflict
-    exists in event scope (same election, same candidate). The only minor uncertainty
-    is the lack of explicit second-round detail in the Kalshi criteria, but that does
-    not alter the fundamental identity of the outcome being predicted.
-  confidence: 0.95
-  proposed_ts: '2026-09-04T21:00:09+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-09-07T14:21:07+00:00'
 - condition_id: '0x9e03b82afb7654f4a2c6db3cc4bf6f1f74b53547ea3600001dac127decb34a23'
   question: Will Moises Ballesteros win the 2026 NL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBNLROTY-26-MBAL
   external_question: Will Moises Ballesteros win NL ROTY?
-  rationale: Both markets resolve to whether Moises Ballesteros wins the 2026 National
-    League Rookie of the Year award. The Polymarket question names the specific player
-    and award, and its resolution criteria confirm resolution to the official winner
-    of that award. The Kalshi market's specific outcome, as indicated by ticker and
-    outcome labels, is 'Moises Ballesteros wins NL ROTY in 2026.' The event, player,
-    season, and award match exactly, with no meaningful criterion divergence. The
-    tie-break rule in Polymarket (alphabetical last name) would only apply if multiple
-    winners are announced, but both markets still resolve to the same official winner
-    as recognized by MLB, so the outcome for this specific named player remains aligned.
-  confidence: 1.0
-  proposed_ts: '2026-09-06T21:00:10+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 1.0
+  confirmed_ts: '2026-09-07T14:21:09+00:00'
 - condition_id: '0xd1cf25d541256ff9b571718cedc6dfe968b0dff60aea1289686d050aab7561df'
   question: Will Bubba Chandler win the 2026 NL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBNLROTY-26-BCHA
   external_question: Will Bubba Chandler win NL ROTY?
-  rationale: Both markets resolve to Yes/true if Bubba Chandler wins the 2026 National
-    League Rookie of the Year award, and No/false otherwise. The Polymarket resolution
-    criteria describe the broader set of individual winners but the question names
-    Bubba Chandler specifically, matching the Kalshi outcome. The event, season, award,
-    and candidate are identical.
-  confidence: 0.95
-  proposed_ts: '2026-09-06T21:00:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-07T14:21:13+00:00'
+- condition_id: kalshi:KXOSCARPIC-27-ODY
+  question: Will The Odyssey win Best Picture at the Oscars?
+  venue: kalshi
+  external_id: KXOSCARPIC-27-ODY
+  external_question: Will The Odyssey win Best Picture at the Oscars?
+  confirmed_ts: '2026-09-07T14:21:16+00:00'
+proposed:
+- condition_id: '0x7586a96520578acaaaa4ea84a2582f197f84255da1f3392a7aa300386c187b37'
+  question: Will Benjamin Netanyahu be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-BNET
+  external_question: Will Benjamin Netanyahu become Prime Minister of Israel following
+    the 2026 Israeli legislative election?
+  rationale: Both markets ask whether Benjamin Netanyahu will become Prime Minister
+    of Israel after the 2026 legislative election. Polymarket's resolution criteria
+    specify the next individual sworn in after that election, explicitly excluding
+    interim/caretaker PMs, with a deadline of Dec 31, 2027. Kalshi's ticker and outcome
+    label (KXISRAELPM-26OCT27-BNET, 'Benjamin Netanyahu') indicate it resolves Yes
+    if Netanyahu becomes PM following the 2026 election and meets constitutional requirements
+    before Oct 27, 2027. The core event and condition (post-election appointment of
+    Netanyahu as PM) are identical. Minor differences in phrasing (e.g., 'as a result
+    of government formation' vs. 'next individual officially appointed and sworn in')
+    and the exact deadline (Oct 27, 2027 vs. Dec 31, 2027) do not create a meaningful
+    divergence for the yes/no outcome in practice, as both require formal assumption
+    of office after the election. The match is strong, though not perfect due to potential
+    edge-case timing or procedural interpretations.
+  confidence: 0.9
+  proposed_ts: '2026-09-09T15:03:53+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
