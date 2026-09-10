@@ -2129,6 +2129,22 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x08a1b8c6d39f5a0e4002a6c8260831d873466bb5016fc26d8c4711a7a0a60f07'
+  question: Will Kyle Tucker win the 2026 National League MVP Award?
+  venue: kalshi
+  external_id: KXMLBNLMVP-26-KTUC
+  external_question: Will Kyle Tucker win NL MVP?
+  rationale: 'Both markets resolve on the same specific outcome: Kyle Tucker winning
+    the 2026 National League MVP Award. Polymarket''s question and criteria identify
+    the 2026 NL MVP winner, and Kalshi''s ticker (KXMLBNLMVP-26-KTUC) and outcome
+    label (''Kyle Tucker'') identify that same player-season award. Resolution sources
+    (MLB official info) align, and no criteria conflict is apparent.'
+  confidence: 0.97
+  proposed_ts: '2026-09-10T21:00:09+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
