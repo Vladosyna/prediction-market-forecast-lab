@@ -2103,44 +2103,61 @@ confirmed:
   external_id: KXOSCARPIC-27-ODY
   external_question: Will The Odyssey win Best Picture at the Oscars?
   confirmed_ts: '2026-09-07T14:21:16+00:00'
-proposed:
 - condition_id: '0x7586a96520578acaaaa4ea84a2582f197f84255da1f3392a7aa300386c187b37'
   question: Will Benjamin Netanyahu be the next Prime Minister of Israel?
   venue: kalshi
   external_id: KXISRAELPM-26OCT27-BNET
   external_question: Will Benjamin Netanyahu become Prime Minister of Israel following
     the 2026 Israeli legislative election?
-  rationale: Both markets ask whether Benjamin Netanyahu will become Prime Minister
-    of Israel after the 2026 legislative election. Polymarket's resolution criteria
-    specify the next individual sworn in after that election, explicitly excluding
-    interim/caretaker PMs, with a deadline of Dec 31, 2027. Kalshi's ticker and outcome
-    label (KXISRAELPM-26OCT27-BNET, 'Benjamin Netanyahu') indicate it resolves Yes
-    if Netanyahu becomes PM following the 2026 election and meets constitutional requirements
-    before Oct 27, 2027. The core event and condition (post-election appointment of
-    Netanyahu as PM) are identical. Minor differences in phrasing (e.g., 'as a result
-    of government formation' vs. 'next individual officially appointed and sworn in')
-    and the exact deadline (Oct 27, 2027 vs. Dec 31, 2027) do not create a meaningful
-    divergence for the yes/no outcome in practice, as both require formal assumption
-    of office after the election. The match is strong, though not perfect due to potential
-    edge-case timing or procedural interpretations.
-  confidence: 0.9
-  proposed_ts: '2026-09-09T15:03:53+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-13T08:16:19+00:00'
 - condition_id: '0x08a1b8c6d39f5a0e4002a6c8260831d873466bb5016fc26d8c4711a7a0a60f07'
   question: Will Kyle Tucker win the 2026 National League MVP Award?
   venue: kalshi
   external_id: KXMLBNLMVP-26-KTUC
   external_question: Will Kyle Tucker win NL MVP?
-  rationale: 'Both markets resolve on the same specific outcome: Kyle Tucker winning
-    the 2026 National League MVP Award. Polymarket''s question and criteria identify
-    the 2026 NL MVP winner, and Kalshi''s ticker (KXMLBNLMVP-26-KTUC) and outcome
-    label (''Kyle Tucker'') identify that same player-season award. Resolution sources
-    (MLB official info) align, and no criteria conflict is apparent.'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-13T08:16:25+00:00'
+- condition_id: kalshi:KXLARGECUT-26
+  question: Will the Fed cut rates more than 25 bps in 2026?
+  venue: kalshi
+  external_id: KXLARGECUT-26
+  external_question: Will the Fed cut rates more than 25 bps in 2026?
+  confirmed_ts: '2026-09-14T14:09:17+00:00'
+- condition_id: kalshi:KXHIGHAUS-26SEP13-B99.5
+  question: "Will the maximum temperature be 99-100\xB0 on Sep 13, 2026?"
+  venue: kalshi
+  external_id: KXHIGHAUS-26SEP14-B99.5
+  external_question: "Will the maximum temperature be 99-100\xB0 on Sep 14, 2026?"
+  confirmed_ts: '2026-09-14T14:09:19+00:00'
+- condition_id: kalshi:KXHURCAT-26EDOUARD-T1
+  question: Will Edouard become a Category 1 hurricane?
+  venue: kalshi
+  external_id: KXHURCAT-26EDOUARD-T1
+  external_question: Will Edouard become a Category 1 hurricane?
+  confirmed_ts: '2026-09-14T14:09:21+00:00'
+proposed:
+- condition_id: '0xb5fc3b7840bdb5c4f83e9d2fe63b09added72e53558a97aec8891f657d465614'
+  question: Will Trey Yesavage win the 2026 AL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBALROTY-26-TYES
+  external_question: Will Trey Yesavage win AL ROTY?
+  rationale: 'Both markets resolve on the same specific event: whether Trey Yesavage
+    wins the 2026 American League Rookie of the Year award. Polymarket''s question
+    and resolution criteria explicitly name this, and Kalshi''s ticker suffix (TYES)
+    and outcome labels (''Trey Yesavage'') confirm the market resolves on Yesavage
+    specifically, despite the broad title. Resolution sources (MLB official / credible
+    reporting) are compatible. Minor differences in edge-case handling (e.g., cancellation
+    timing, tie-break rules) are typical boilerplate and do not create a substantive
+    mismatch.'
   confidence: 0.97
-  proposed_ts: '2026-09-10T21:00:09+00:00'
+  proposed_ts: '2026-09-16T16:16:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
