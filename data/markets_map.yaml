@@ -2162,6 +2162,23 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x52856d2f2383278ee1cd74867cc8ec948a9cd2fb84bfd04cd9fb85f1e4d71d27'
+  question: Will Corey Seager win the 2026 American League MVP Award?
+  venue: kalshi
+  external_id: KXMLBALMVP-26-CSEA
+  external_question: Will Corey Seager win AL MVP?
+  rationale: 'Both markets resolve on the same specific outcome: Corey Seager winning
+    the 2026 American League MVP award. Polymarket''s question and criteria specify
+    the 2026 AL MVP winner (with a named-player leg), and the Kalshi market (KXMLBALMVP-26-CSEA)
+    explicitly resolves Yes iff Corey Seager wins the 2026 AL MVP. The resolution
+    sources and timeframes are consistent (2026 MLB season, official MLB determination),
+    and no material divergence in criteria exists. High confidence in identity.'
+  confidence: 0.95
+  proposed_ts: '2026-09-18T15:11:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
