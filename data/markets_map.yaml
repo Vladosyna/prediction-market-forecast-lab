@@ -2179,6 +2179,24 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x8024d164af23e51dbbe9792764b12437fe855ad98ecb71d4bed8e252ff1b4309'
+  question: Will Mookie Betts win the 2026 National League MVP Award?
+  venue: kalshi
+  external_id: KXMLBNLMVP-26-MBET
+  external_question: Will Mookie Betts win NL MVP?
+  rationale: 'Both markets resolve on the same specific outcome: Mookie Betts winning
+    the 2026 National League MVP Award. The Kalshi ticker suffix (MBET) and outcome
+    labels identify the Mookie Betts leg, and its resolution criterion matches the
+    Polymarket question. Polymarket''s tie/cancellation provisions only alter edge-case
+    handling, not the core event definition, and the resolution source (official MLB
+    information) is consistent. Minor procedural differences are unlikely to cause
+    divergent resolution.'
+  confidence: 0.95
+  proposed_ts: '2026-09-19T15:11:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
