@@ -432,3 +432,43 @@ def test_null_control_filter_is_a_no_op_without_sports(tmp_path):
     assert drop_null_control_outsiders(conn, load_config(), ids) == set(ids)
     assert drop_null_control_outsiders(conn, load_config(), []) == set()
     conn.close()
+
+
+def test_no_write_transaction_spans_a_models_work(tmp_path):
+    """2026-09-25: a 250-row batch commit bounded the forecast pass's write lock
+    by row count, not by time -- so the lock stayed held across M3's LLM calls
+    and M5's network requests, and collector jobs waiting on it died at
+    busy_timeout (112-168 a day). Every model's forecast() must now start with
+    no transaction open on the connection."""
+    from lab.forecast import run_forecasts
+    from lab.models.base import ForecastResult, MarketState
+
+    config = load_config()
+    c = db.connect(tmp_path / "lab.db")
+    for i in range(3):
+        _seed_market(c, f"m{i}", category="economics", tier="liquid")
+    c.commit()
+
+    observed: list[bool] = []
+
+    class _Probe:
+        def __init__(self, model_id):
+            self.model_id = model_id
+
+        def forecast(self, market, context):
+            observed.append(c.in_transaction)
+            return ForecastResult(p_yes=0.5, meta={})
+
+    states = [MarketState(condition_id=f"m{i}", question="q", category="economics",
+                          description="d", end_date_iso="2027-01-01T00:00:00Z", tier="liquid",
+                          p_market=0.5, spread=0.01, snapshot_ts=now_utc_iso(),
+                          days_to_resolution=90.0, venue="polymarket")
+              for i in range(3)]
+    from lab.store.snapshots import SnapshotStore
+
+    run_forecasts(c, SnapshotStore(tmp_path / "snapshots"),
+                  [_Probe("m0_market"), _Probe("m1_debiased")], config, states=states)
+    assert observed and not any(observed), (
+        "a model started its work while the previous write was still uncommitted"
+    )
+    c.close()

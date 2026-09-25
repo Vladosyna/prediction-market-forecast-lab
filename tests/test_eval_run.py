@@ -205,3 +205,29 @@ def test_run_eval_emits_horizon_bucket_rows():
         "horizon rows must carry their own window_label so they never overwrite "
         "a primary row"
     )
+
+
+def test_each_eval_row_is_committed_as_it_is_written(config, monkeypatch):
+    """run_eval used to commit once per MODEL, so the transaction opened by the
+    first eval_runs INSERT stayed open through every bootstrap and confidence
+    sequence for the rest of that model -- minutes at a time -- while collector
+    jobs died at busy_timeout behind it. Each row must be committed on write."""
+    import lab.eval.run as er
+
+    conn = db.connect(config["storage"]["db_path"])
+    _seed(conn, "poly_econ", "polymarket", "economics")
+    _seed(conn, "poly_pol", "polymarket", "politics")
+    conn.commit()
+
+    open_after_insert: list[bool] = []
+    real = er.evaluate_model
+
+    def spy(conn_, *a, **kw):
+        out = real(conn_, *a, **kw)
+        open_after_insert.append(conn_.in_transaction)
+        return out
+
+    monkeypatch.setattr(er, "evaluate_model", spy)
+    er.run_eval(conn, config)
+    assert open_after_insert and not any(open_after_insert)
+    conn.close()

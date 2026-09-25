@@ -336,6 +336,12 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
     exhausted: set[str] = set()  # models past their daily budget
     for state in states:
         for model in models:
+            # Close whatever the previous iteration left open -- its ledger
+            # row, or the evidence_runs row M3 inserts inside forecast() --
+            # BEFORE this model's own slow work begins. See the comment at the
+            # append below for why a transaction must never span that work.
+            if conn.in_transaction:
+                conn.commit()
             if model.model_id in exhausted:
                 continue
             if not _due(conn, state.condition_id, model.model_id, config,
@@ -380,18 +386,23 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                 "trades_24h": None,
             })
             counts["written"] += 1
-            # Bounded write transactions. Until 2026-08-25 this loop committed
-            # ONCE, after every model over every market, so the forecast pass
-            # held a write lock from 02:00 to 02:20 and eval from 02:21 to
-            # 02:50. Any collector job firing inside those windows failed with
-            # "database is locked" and skipped a whole cycle -- seven such
-            # failures in one night, against which no busy_timeout worth
-            # setting can help. Batching also improves the crash case: a run
-            # interrupted mid-way now leaves the rows it had already written
-            # rather than losing all of them, which suits an append-only
-            # ledger exactly.
-            if counts["written"] % FORECAST_COMMIT_BATCH == 0:
-                conn.commit()
+            # One short transaction per write, never one spanning the next
+            # model's work (2026-09-25). Until 2026-08-25 this loop committed
+            # ONCE, holding the write lock from 02:00 to 02:20; a 250-row batch
+            # replaced that, which bounded the lock by ROW COUNT but not by
+            # TIME -- and the time is what other writers wait on. Between two
+            # batch commits the connection held an open write transaction
+            # across everything the models do, including M3's news fetches and
+            # LLM calls (m3_evidence also INSERTs its own evidence_runs row
+            # inside model.forecast(), opening the transaction itself) and
+            # M5's Open-Meteo/FRED requests: seconds each, hundreds of them per
+            # batch. Collector jobs waiting on that lock hit busy_timeout and
+            # died -- 112 to 168 "database is locked" failures a day by
+            # 2026-09-21, 89% of Kalshi universe syncs and ~80% of resolution
+            # watcher runs. A commit costs milliseconds; holding the lock
+            # across a network call costs other jobs their whole cycle.
+            # FORECAST_COMMIT_BATCH stays as the name the crash-case reasoning
+            # above refers to; the batch is now simply one row.
     conn.commit()
     # `models` in the log line, not just the counts: the job makes two passes
     # and the 2026-08-14 ensemble outage was invisible for six days partly

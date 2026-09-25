@@ -197,6 +197,14 @@ def evaluate_model(
          rps_result.rps_model if rps_result else None,
          rps_result.rps_market if rps_result else None),
     )
+    # Commit this row now (2026-09-25). run_eval used to commit once per
+    # MODEL, which meant the write transaction opened by this INSERT stayed
+    # open through every bootstrap, confidence sequence and stratified fit for
+    # the rest of that model's venues x categories x windows x horizon buckets
+    # -- minutes at a time, dozens of times a night -- while collector jobs
+    # queued behind it and died at busy_timeout. eval_runs rows are
+    # independent, so a partial run is still a coherent prefix.
+    conn.commit()
     return {
         "model_id": model_id, "window": window_label, "venue": venue, "category": category,
         "result": result, "bins": bins, "cs": cs, "stratified": stratified,
