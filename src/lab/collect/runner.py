@@ -387,6 +387,21 @@ class AnalyticsContext:
     max_age_hours: dict[str, float]
 
 
+# Services the catch-up (startup + hourly health check) never runs, however
+# overdue they are (2026-09-25). The catch-up has no backoff: a service that
+# FAILS past its control age is retried on every tick, forever, because a
+# failure records no success. For `report` that became the worst possible loop.
+# The weekly render OOM'd on 2026-09-20 (the database had doubled to 2.1GB),
+# crossed its 192h control age on 09-24 at 17:05, and from then on every hourly
+# health check started it again; each attempt was OOM-killed, and systemd's
+# default OOMPolicy=stop took the whole orchestrator down with it -- twelve
+# times in thirteen hours, killing snapshot rounds mid-flight every time.
+# The report renders data the nightly bundle has already committed, so a stale
+# page costs nothing a retry storm is worth; the weekly cron still runs it, and
+# `lab report` stays available on demand.
+NO_CATCH_UP = frozenset({"report"})
+
+
 def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
     control = config.get("schedule", {}).get("control", {})
     return {
@@ -401,6 +416,27 @@ def _control_max_ages(config: dict[str, Any]) -> dict[str, float]:
         "pmxt_verify": control.get("pmxt_verify_max_age_hours", 18),
         "paper_export": control.get("paper_export_max_age_hours", 192),
     }
+
+
+def _mark_preferred_oom_victim(pid: int) -> None:
+    """Make a batch child the kernel's first choice when the cgroup runs out.
+
+    The child shares lab-run.service's cgroup, so when the pair together
+    crosses MemoryMax the kernel picks ONE process to kill by oom_score --
+    usually the bigger child, but nothing guaranteed it, and losing the
+    collector instead is the one outcome this whole out-of-process design
+    exists to prevent. 1000 is the maximum: always this child first. Written
+    from the parent rather than via preexec_fn, which CPython documents as
+    unsafe once threads exist (asyncio.to_thread guarantees they do here); the
+    race is harmless because the child spends seconds importing before it can
+    allocate anything that matters. Best-effort: no /proc (Windows, tests)
+    simply means no adjustment.
+    """
+    try:
+        with open(f"/proc/{pid}/oom_score_adj", "w", encoding="ascii") as fh:
+            fh.write("1000")
+    except OSError:
+        pass
 
 
 async def _run_lab_command_out_of_process(*args: str) -> None:
@@ -432,6 +468,7 @@ async def _run_lab_command_out_of_process(*args: str) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+    _mark_preferred_oom_victim(proc.pid)
     out, _ = await proc.communicate()
     tail = (out or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
     if proc.returncode != 0:
@@ -577,7 +614,7 @@ async def _run_overdue_services(
     skip = skip or set()
     started: list[str] = []
     for name, service in actx.services.items():
-        if name in skip:
+        if name in skip or name in NO_CATCH_UP:
             continue
         age = await asyncio.to_thread(last_run_age_seconds, config, name)
         if is_overdue(age, actx.max_age_hours[name]):

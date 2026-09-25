@@ -394,3 +394,72 @@ def test_coverage_watchdog_defaults_to_the_latest_complete_day(tmp_path):
     # no rows for 2026-08-21 at all: the default target is 08-20, which is fine
     assert coverage_regressions(conn) == []
     conn.close()
+
+
+def test_a_failing_report_is_never_retried_by_the_catch_up():
+    """2026-09-20..25: the weekly render OOM'd, crossed its 192h control age,
+    and the catch-up -- which has no backoff, since a failure records no
+    success -- started it again on every hourly health check. Each attempt was
+    OOM-killed and took the orchestrator down with it, twelve times in
+    thirteen hours. The weekly cron still runs it; the catch-up never does."""
+    import asyncio
+
+    from lab.collect import runner
+
+    ran: list[str] = []
+
+    def svc(name):
+        async def _s():
+            ran.append(name)
+        return _s
+
+    actx = runner.AnalyticsContext(
+        services={"report": svc("report"), "shadow": svc("shadow")},
+        max_age_hours={"report": 192, "shadow": 168},
+    )
+
+    import lab.schedule_state as ss
+    orig = ss.last_run_age_seconds
+    ss.last_run_age_seconds = lambda config, name: 10 ** 9     # everything hugely overdue
+    try:
+        started = asyncio.run(runner._run_overdue_services({}, actx))
+    finally:
+        ss.last_run_age_seconds = orig
+
+    assert "report" not in ran and "report" not in started
+    assert ran == ["shadow"], "every other overdue service must still be caught up"
+
+
+def test_a_batch_child_is_marked_as_the_preferred_oom_victim(tmp_path, monkeypatch):
+    """The child shares lab-run's cgroup; when the pair crosses MemoryMax the
+    kernel kills ONE process by oom_score. It must never be the collector."""
+    from lab.collect import runner
+
+    written: dict[str, str] = {}
+
+    real_open = open
+
+    def fake_open(path, mode="r", *a, **kw):
+        if str(path).startswith("/proc/") and str(path).endswith("/oom_score_adj"):
+            class _F:
+                def __enter__(self_inner):
+                    return self_inner
+
+                def __exit__(self_inner, *exc):
+                    return False
+
+                def write(self_inner, s):
+                    written[str(path)] = s
+            return _F()
+        return real_open(path, mode, *a, **kw)
+
+    monkeypatch.setattr("builtins.open", fake_open)
+    runner._mark_preferred_oom_victim(4242)
+    assert written == {"/proc/4242/oom_score_adj": "1000"}
+
+
+def test_marking_the_oom_victim_is_best_effort():
+    """No /proc (Windows, containers) must never break a batch job."""
+    from lab.collect import runner
+
+    runner._mark_preferred_oom_victim(999999999)   # nonexistent pid: must not raise
