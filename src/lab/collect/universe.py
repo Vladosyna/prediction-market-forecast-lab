@@ -157,13 +157,76 @@ def _link_negrisk_legs(conn, condition_ids: list[str], title: str | None) -> Non
     correctly propagates ONE shared id across all N legs -- no new N-ary
     linking primitive needed. This is what lets Phase 16's RPS scoring find
     "which legs belong to one bucketed numeric question" on RESOLVED
-    forecasts later -- Gamma's own event grouping is live-only (gone once a
-    market closes), so it must be persisted here, not reconstructed after
-    the fact. Idempotent: re-sync of an already-linked event is a no-op.
+    forecasts later. Idempotent: re-sync of an already-linked event is a no-op.
+
+    Two corrections, 2026-09-25 (PAP 9.33). This now links EVERY multi-market
+    event, not only negRisk ones -- the venue's grouping is the evaluation's
+    clustering unit, and non-negRisk events (date ladders, per-person events)
+    had been counted as independent observations. And this docstring used to
+    say Gamma's grouping "is live-only (gone once a market closes)"; checked
+    against the live API it is not -- closed markets still carry `events`,
+    which is what lets `backfill_event_links` repair the resolved ones.
     """
     first = condition_ids[0]
     for other in condition_ids[1:]:
         db.link_event(conn, first, other, title=title)
+
+
+async def backfill_event_links(conn, gamma, batch: int = 50) -> dict[str, int]:
+    """Link every forecast-bearing Polymarket market to the other legs of its
+    Gamma event, for the markets the universe sync will never see again.
+
+    The sync only walks OPEN events, and until 2026-09-25 it linked only
+    negRisk ones, so every closed market from a multi-market non-negRisk
+    event -- the resolved markets the evaluation actually scores -- sits in a
+    cluster of its own. This comment's predecessor (on `_link_negrisk_legs`)
+    held that Gamma's event grouping "is live-only (gone once a market
+    closes)"; checked against the live API on 2026-09-25, it is not: a closed
+    market's /markets object still carries `events`. All 2,708 resolved
+    markets forecast since 2026-07-06 returned one.
+
+    Idempotent (link_event reuses an existing id), network-bound, run once
+    via `lab link-events`; never from a migration, which must stay offline.
+    """
+    cids = [r["condition_id"] for r in conn.execute(
+        "SELECT DISTINCT m.condition_id FROM markets m "
+        "JOIN forecasts f ON f.condition_id = m.condition_id "
+        "WHERE COALESCE(m.venue, 'polymarket') = 'polymarket'")]
+    known = set(cids)
+    groups: dict[str, list[str]] = {}
+    titles: dict[str, str | None] = {}
+    fetched = 0
+    for i in range(0, len(cids), batch):
+        part = cids[i:i + batch]
+        for closed in ("true", None):
+            params: dict[str, Any] = {"condition_ids": part, "limit": len(part)}
+            if closed:
+                params["closed"] = closed
+            try:
+                raw = await gamma.get_json("/markets", params=params)
+            except Exception:
+                log.warning("event backfill: gamma batch failed", extra={"ctx": {"offset": i}})
+                continue
+            items = raw if isinstance(raw, list) else (raw or {}).get("markets", [])
+            for m in items:
+                cid, events = m.get("conditionId"), m.get("events") or []
+                if cid not in known or not events or any(cid in g for g in groups.values()):
+                    continue
+                gid = str(events[0].get("id"))
+                groups.setdefault(gid, []).append(cid)
+                titles.setdefault(gid, events[0].get("slug"))
+                fetched += 1
+    linked = 0
+    for gid, members in groups.items():
+        if len(members) >= 2:
+            _link_negrisk_legs(conn, sorted(members), title=titles.get(gid))
+            linked += len(members)
+    conn.commit()
+    out = {"markets": len(cids), "with_event": fetched,
+           "multi_market_events": sum(1 for m in groups.values() if len(m) >= 2),
+           "markets_linked": linked}
+    log.info("event backfill complete", extra={"ctx": out})
+    return out
 
 
 def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict[str, float]:
@@ -269,9 +332,17 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
                 mid = mid_by_market.get(effective.condition_id)
                 if mid is not None and not (price_lo < mid < price_hi):
                     log_universe_exclusion(conn, "polymarket", effective.condition_id, "tail_price")
-            if ev.neg_risk:
-                event_leg_ids.append(effective.condition_id)
-        if ev.neg_risk and len(event_leg_ids) >= 2:
+            # Every leg of a multi-market Gamma event, negRisk or not
+            # (2026-09-25, PAP 9.33). Only negRisk events were linked, so a
+            # date ladder ("by March" / "by June" / "by December") or a
+            # per-person event ("who will Trump speak to") counted as that
+            # many independent observations of the world -- measured: 1,690
+            # clusters since 2026-07-06 were really 1,355, and H1's stratum
+            # 169 was 150. The venue's own grouping is the unit, exactly as
+            # Kalshi's event ticker became it in 9.25. Over-clustering can
+            # only widen an interval; under-clustering is what overstates n.
+            event_leg_ids.append(effective.condition_id)
+        if len(event_leg_ids) >= 2:
             _link_negrisk_legs(conn, event_leg_ids, title=ev.slug)
         # Bounded transactions, not one for the whole universe (2026-09-09).
         # A single commit at the end held one write lock across every upsert in

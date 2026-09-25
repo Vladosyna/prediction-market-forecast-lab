@@ -91,6 +91,34 @@ def sync() -> None:
     typer.echo(f"universe sync: {counts}")
 
 
+@app.command("link-events")
+def link_events() -> None:
+    """One-off (PAP 9.33): link every forecast-bearing Polymarket market to the
+    other legs of its Gamma event -- the closed markets the hourly sync will
+    never see again. Idempotent; safe to re-run."""
+    from lab.api.gamma import GammaClient
+    from lab.api.http import TokenBucket
+    from lab.collect.universe import backfill_event_links
+    from lab.store import db
+
+    config = load_config()
+
+    async def _run() -> dict:
+        bucket = TokenBucket(
+            rate=config["collect"]["rate_limit"]["requests_per_second"],
+            burst=config["collect"]["rate_limit"]["burst"],
+        )
+        gamma = GammaClient(bucket)
+        conn = db.connect(config["storage"]["db_path"])
+        try:
+            return await backfill_event_links(conn, gamma)
+        finally:
+            await gamma.aclose()
+            conn.close()
+
+    typer.echo(f"event links: {asyncio.run(_run())}")
+
+
 @app.command()
 def exclude(
     venue: str = typer.Argument(..., help="e.g. polymarket, kalshi."),

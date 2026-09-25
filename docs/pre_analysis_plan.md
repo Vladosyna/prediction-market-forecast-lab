@@ -1362,3 +1362,37 @@ may differ from a recomputation in their tie-breaking, and only there.
 The fix deliberately does **not** add an `ORDER BY` to the shared resolved-forecast query: making
 the statistic independent of row order is the property that matters, and it now holds whatever
 order the rows arrive in.
+
+**Addendum 9.33 (2026-09-25).** Polymarket's event clustering is corrected the way 9.25 corrected
+Kalshi's, with a smaller effect. Declared, measured and applied the same day; it removes power.
+
+**What was wrong.** §7 clusters by `event_id` because "the same underlying event ... is still ONE
+observation of the world". On Polymarket, only negRisk events were ever linked. Every other
+multi-market Gamma event — date ladders ("by March" / "by June" / "by December", whose outcomes are
+nested), per-person or per-item events ("who will Trump speak to in September") — counted as that
+many independent observations. The code also asserted, wrongly, that Gamma's grouping disappears
+once a market closes, which is why nothing tried to repair resolved markets: checked against the
+live API on 2026-09-25, a closed market's object still carries its event, and all 2,708 resolved
+Polymarket markets forecast since 2026-07-06 returned one.
+
+**Magnitude, measured before applying.** Over resolved Polymarket markets forecast since
+2026-07-06, clusters fall from **1,690 to 1,355 (−19.8%)**, from 104 multi-market non-negRisk
+events. In H1's confirmatory stratum — `m1_debiased`, stated horizon 30–90 days (9.31) — from
+**169 to 150 (−11.2%)**. The earlier heuristic estimate of about 12% for that stratum (from
+question-template matching) is confirmed by the venue's own grouping.
+
+**The change.** The universe sync now links the legs of every multi-market Gamma event, and a
+one-off backfill (`lab link-events`) links the closed markets the sync will never see again.
+Over-clustering can only widen an interval; under-clustering is what overstates n, so the
+direction of any error left is the safe one. Phase 16's RPS keeps its own guard — an event is
+scored as a distribution only when exactly one leg resolves YES and every leg parses as a numeric
+bucket — so nested ladders and per-person events do not enter it.
+
+**Consequence, stated plainly.** With the stated horizon of 9.31, the confirmatory window of §6 and
+this clustering, H1's primary stratum holds **~150 event clusters** — below the plan's 200-cluster
+INSUFFICIENT threshold. That is the honest size of the primary test. It strengthens 9.31's
+commitment to report H1 at the freeze as a bound on the effect as well as a test.
+
+**Direction.** Like 9.25, this correction removes power and was found by auditing whether the study
+can answer its own question. Any Polymarket interval computed before this date is narrower than it
+should have been.

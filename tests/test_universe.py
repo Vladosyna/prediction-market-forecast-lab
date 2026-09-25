@@ -369,7 +369,14 @@ def test_sync_universe_links_negrisk_legs_into_one_event_id(tmp_path):
     conn.close()
 
 
-def test_sync_universe_does_not_link_non_negrisk_event_legs(tmp_path):
+def test_sync_universe_links_non_negrisk_event_legs_too(tmp_path):
+    """Inverted on 2026-09-25 (PAP 9.33). This test used to assert the
+    opposite, from when event links served only Phase 16's RPS, where a
+    non-negRisk event must not be read as one distribution. But event_id is
+    also the evaluation's clustering unit (§7), and leaving these legs unlinked
+    counted a date ladder or a per-person event as that many independent
+    observations -- 1,690 Polymarket clusters since 07-06 were really 1,355.
+    RPS keeps its own guard (exactly one YES leg, numeric bucket questions)."""
     legs = [_leg("0xd"), _leg("0xe")]
     event = GammaEvent.model_validate({
         "slug": "unrelated-event", "negRisk": False, "tags": [],
@@ -384,7 +391,7 @@ def test_sync_universe_does_not_link_non_negrisk_event_legs(tmp_path):
     rows = conn.execute(
         "SELECT condition_id, event_id FROM markets WHERE condition_id IN ('0xd','0xe')"
     ).fetchall()
-    assert all(r["event_id"] is None for r in rows)
+    assert rows[0]["event_id"] and rows[0]["event_id"] == rows[1]["event_id"]
     conn.close()
 
 
@@ -420,3 +427,44 @@ def test_depth_lookup_treats_a_present_but_empty_quote_as_no_data(tmp_path):
         "a quote with no size on either side must be absent, not $0 -- "
         "absent falls back to the proxy rule, $0 tiers the market 'ignored'"
     )
+
+
+# --- non-negRisk event clustering (2026-09-25, PAP 9.33) ----------------------
+
+def test_backfill_links_the_legs_of_a_non_negrisk_event_and_leaves_singletons(tmp_path):
+    """Closed markets from multi-market non-negRisk events sat in clusters of
+    their own -- measured 1,690 clusters since 07-06 that were really 1,355.
+    Gamma still reports a closed market's event, so the repair is possible."""
+    import asyncio
+
+    from lab.collect.universe import backfill_event_links
+    from lab.store import db as dbm
+    from lab.util import now_utc_iso
+
+    conn = dbm.connect(tmp_path / "lab.db")
+    for cid in ("0xa", "0xb", "0xc", "0xsolo"):
+        conn.execute("INSERT INTO markets (condition_id, venue, question, tier, active, closed) "
+                     "VALUES (?, 'polymarket', 'q', 'tail', 0, 1)", (cid,))
+        dbm.append_forecast(conn, {"ts": now_utc_iso(), "condition_id": cid,
+                                   "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5})
+    conn.commit()
+
+    class _Gamma:
+        async def get_json(self, path, params=None):
+            ev = {"id": 917944, "slug": "who-will-trump-speak-to", "negRisk": False}
+            solo = {"id": 1, "slug": "solo", "negRisk": False}
+            return [{"conditionId": c, "events": [solo if c == "0xsolo" else ev]}
+                    for c in params["condition_ids"]]
+
+    out = asyncio.run(backfill_event_links(conn, _Gamma()))
+    ids = {r["condition_id"]: r["event_id"] for r in conn.execute(
+        "SELECT condition_id, event_id FROM markets")}
+    assert ids["0xa"] and ids["0xa"] == ids["0xb"] == ids["0xc"]
+    assert ids["0xsolo"] is None, "a one-market event is not a cluster to merge"
+    assert out["multi_market_events"] == 1 and out["markets_linked"] == 3
+
+    # idempotent: a second pass mints nothing new
+    before = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    asyncio.run(backfill_event_links(conn, _Gamma()))
+    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == before
+    conn.close()
