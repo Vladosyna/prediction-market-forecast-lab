@@ -174,11 +174,11 @@ def test_eval_runs_rps_columns_populate_only_with_enough_bucketed_events(config)
 
 # --- H1's horizon buckets must actually be scored (2026-08-10) --------------
 
-def test_horizon_bucket_classification_uses_resolution_time():
+def test_realized_horizon_bucket_classification():
     """`m1_resolved_rows`' own convention: resolved_ts - forecast_ts, not the
     market's stated end date, so a market that settles early or late is
     bucketed by what actually happened."""
-    from lab.eval.run import _horizon_bucket
+    from lab.eval.run import _realized_horizon_bucket as _horizon_bucket
 
     def row(ts, res):
         return {"forecast_ts": ts, "resolved_ts": res}
@@ -204,8 +204,8 @@ def test_run_eval_emits_horizon_bucket_rows():
     from lab.eval import run as evalrun
 
     src = inspect.getsource(evalrun.run_eval)
-    assert "_horizon_bucket(row)" in src, "run_eval no longer buckets by horizon"
-    assert 'f"{label}_h_{bucket}"' in src, (
+    assert "_stated_horizon_bucket" in src, "run_eval no longer buckets by horizon"
+    assert 'f"{label}_{tag}_{bucket}"' in src, (
         "horizon rows must carry their own window_label so they never overwrite "
         "a primary row"
     )
@@ -291,4 +291,71 @@ def test_the_confirmatory_window_is_the_pap_section_6_sample(config):
     run_eval(conn, config)
     assert _n(conn, "polymarket", "confirmatory") == 1
     assert _n(conn, "polymarket", "all_time") == 2
+    conn.close()
+
+
+
+# --- horizon definition (2026-09-25, PAP 9.31) --------------------------------
+
+def test_the_stated_horizon_is_primary_and_does_not_look_at_the_outcome():
+    """Bucketing by realized horizon conditions on the outcome: a "by date"
+    market resolves early when the event happens. The primary bucket must be
+    what was knowable when the forecast was made."""
+    from lab.eval.run import _realized_horizon_bucket, _stated_horizon_bucket
+
+    early_yes = {"forecast_ts": "2026-07-10T00:00:00+00:00",
+                 "end_date_iso": "2026-10-10T00:00:00+00:00",     # stated: ~92 days
+                 "resolved_ts": "2026-07-15T00:00:00+00:00",      # happened early
+                 "days_to_resolution_at_ts": None}
+    assert _stated_horizon_bucket(early_yes) == "gt90d"
+    assert _realized_horizon_bucket(early_yes) == "lt7d"
+
+    frozen = {**early_yes, "days_to_resolution_at_ts": 45.0}
+    assert _stated_horizon_bucket(frozen) == "30to90d", "the frozen value wins over the proxy"
+
+
+def test_confirmatory_carries_both_definitions_and_other_windows_only_the_primary(config):
+    conn = db.connect(config["storage"]["db_path"])
+    db.upsert_market(conn, {
+        "condition_id": "poly:h", "venue": "polymarket", "venue_native_id": "poly:h",
+        "slug": None, "question": "q", "category": "politics", "description": "d",
+        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "liquid",
+    })
+    db.append_forecast(conn, {"ts": "2026-09-10T02:00:00+00:00", "condition_id": "poly:h",
+                              "model_id": "m0_market", "p_yes": 0.6, "p_market_at_ts": 0.5,
+                              "days_to_resolution_at_ts": 40.0})
+    db.record_resolution(conn, "poly:h", "2026-09-12T00:00:00+00:00", 1.0, False, "gamma")
+    conn.commit()
+    run_eval(conn, config)
+    labels = {r["window_label"] for r in conn.execute(
+        "SELECT window_label FROM eval_runs WHERE model_id='m0_market' AND venue='polymarket'")}
+    assert "confirmatory_hs_30to90d" in labels
+    assert "confirmatory_hr_lt7d" in labels
+    assert "all_time_hs_30to90d" in labels
+    assert not any(l.startswith("all_time_hr_") or "_h_" in l for l in labels)
+    conn.close()
+
+
+def test_the_m1_refit_learns_on_the_horizon_it_is_applied_on(config):
+    """M1 picks its curve from the STATED horizon at forecast time; the lab's
+    own refit fitted on the realized one -- a train/serve skew that also
+    conditions on the outcome."""
+    from lab.learn.loop import m1_resolved_rows
+
+    conn = db.connect(config["storage"]["db_path"])
+    db.upsert_market(conn, {
+        "condition_id": "poly:r", "venue": "polymarket", "venue_native_id": "poly:r",
+        "slug": None, "question": "q", "category": "politics", "description": "d",
+        "end_date_iso": "2026-11-08T02:00:00+00:00", "token_id_yes": None, "token_id_no": None,
+        "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "liquid",
+    })
+    db.append_forecast(conn, {"ts": "2026-09-09T02:00:00+00:00", "condition_id": "poly:r",
+                              "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5})
+    db.record_resolution(conn, "poly:r", "2026-09-14T02:00:00+00:00", 1.0, False, "gamma")
+    conn.commit()
+    (row,) = m1_resolved_rows(conn)
+    assert row["days_to_resolution"] == pytest.approx(60.0, abs=0.01), "stated, not the 5 realized"
     conn.close()

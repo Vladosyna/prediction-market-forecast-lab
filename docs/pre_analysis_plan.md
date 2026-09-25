@@ -1286,3 +1286,60 @@ observations", which it does, and named the snapshot budget as the thing to watc
 What it did not do was bound the expansion by the budget. An expansion of the observed universe must
 come with the collection capacity to observe it; this one did not, and the result was the opposite of
 its stated direction for eight days.
+
+**Addendum 9.31 (2026-09-25).** H1's horizon strata change from the realized horizon to the stated
+horizon at forecast time, and three pre-registered rules the code had never applied are now enforced.
+This changes how H1's primary statistic is stratified, so the reasons are given in full, and the old
+definition is kept as a named sensitivity analysis rather than dropped.
+
+**What H1's strata were.** §2 states H1 over "the ≥30-day horizon buckets" without defining the
+horizon. The evaluation computed it as resolution time minus forecast time — the *realized* horizon.
+That conditions on the outcome. A "will X happen by date" market resolves early precisely when X
+happens, so the realized horizon of a YES market is systematically shorter than its stated one, and
+the long realized buckets are enriched for NO. Measured on Polymarket `m0_market` rows since
+2026-07-06: markets stated as >90 days out that resolved early were **87–91% YES** at prices near
+0.65; the ≥30-day bucket showed price minus outcome **+0.026** under the realized definition and
+**−0.009** under the stated one. The realized definition manufactures a miscalibration in the
+direction H1 predicts. It also inherits operational noise: `resolved_ts` is when the lab's watcher
+*recorded* an outcome, not when the venue resolved it — on Polymarket NO resolutions the recorded time
+trails the end date by p50 0.8 days, p75 7.3, p90 16.2 — so bucket membership depended on the
+watcher's queue position, and on its failures (~80% of watcher runs failed on write locks in the week
+to 2026-09-25).
+
+**What they are now.** The primary strata use the **stated** horizon — days from the forecast to the
+market's stated end date — which is the only horizon knowable when the forecast was made and the one
+M1 itself used to choose its curve. From 2026-09-25 each forecast freezes it
+(`forecasts.days_to_resolution_at_ts`); older rows fall back to the market's recorded end date, a
+proxy that differs only where a venue moved the date after the forecast. Rows are labelled
+`<window>_hs_<bucket>`; the realized definition continues as `confirmatory_hr_<bucket>`, reported
+beside the primary as a sensitivity analysis. The ambiguous `_h_` label is no longer written; its
+historical rows keep their realized meaning.
+
+**Why this is not outcome-shopping, stated because it is the obvious objection.** The measurement
+that motivated the change is the *market's* calibration gap under each definition, not any model's
+skill; M1's skill under the stated definition had not been computed when this addendum was written.
+The argument is one of validity — a stratum must not be defined by the outcome it is used to score —
+and it would stand whatever either definition showed. Both are reported.
+
+**What the models learned from.** The active M1 curves (`m1_curves` v1, promoted 2026-07-03) were fit
+on the historical bootstrap using each market's `end_date` minus the observation time — the stated
+horizon — so the model in production has no train/serve skew. The lab's own refit path
+(`learn/loop.py`, which would fit future challengers) used the realized horizon; it now uses the
+stated one. No M1 or M1.x challenger has been promoted since July, so no live forecast was affected.
+
+**Three rules the code had not applied, now enforced (from 2026-09-25's evaluation onward).** (1) The
+confirmatory sample of §6 — forecasts made on or after 2026-07-06 — did not correspond to any
+evaluated window; `confirmatory` is added beside `all_time` and `trailing_90d`, and H1's primary
+statistic is its `_hs_` strata. (2) The Kalshi exclusion windows of 9.17, 9.26 and 9.30 were not
+applied to any statistic; they now bind every Kalshi row, the null control included. (3) Both rules
+are constants in code rather than configuration. The paper export remains the complete record and
+documents which windows to apply. Evaluation rows written before 2026-09-25 apply none of this.
+
+**How H1 will be reported, given its realized power.** H1's confirmatory stratum held ~268 event
+clusters for `m1_debiased` on 2026-09-25, with a confidence sequence of roughly ±0.05 around a point
+estimate of −0.003; the >90-day stratum had no resolved clusters at all, which a study of this length
+cannot fix. At the projected size by the freeze the sequence will span roughly ±0.035. H1 remains the
+pre-registered hypothesis with its decision rule unchanged (§3). In addition, and committed here
+before the confirmatory analysis is run, the paper will report the confidence sequence at the freeze
+as a **bound** on long-horizon recalibration skill — the range of effects the data rule out — since
+that is the question these data can actually answer.

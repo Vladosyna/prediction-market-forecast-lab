@@ -44,6 +44,8 @@ else needs redacting.
 | `volume_24h` | float or null | The venue's own 24-hour volume for the market, captured at universe sync (Gamma `volume24hr`, Kalshi `volume_24h_fp`). Same forward-only rule and same null semantics as `depth_covariate`. |
 | `trades_24h` | int or null | **Null throughout.** Neither venue reports a 24-hour trade count on the objects the collector already fetches, and a per-market Data API call was not added at the collector's sustained request rate. Present in the schema so the column's absence is explicit rather than silent; reported as not collected, not as missing data. |
 | `hour_utc` | int (0–23) or null | Hour of day, UTC, at freeze time. Derivable from `forecast_ts`, stored because CLAUDE.md §5's schema names it. Null before 2026-08-10. |
+| `end_date_iso` | string or null | The market's end date **as recorded when the export ran** (venues occasionally move it). Used for H1's primary horizon strata on rows that predate `days_to_resolution_at_ts` — stated horizon = `end_date_iso` − `forecast_ts`. |
+| `days_to_resolution_at_ts` | float or null | Days from the forecast to the market's stated end date, **frozen at forecast time** — the horizon the model itself used. Null on every row frozen before 2026-09-25 (forward-only; fall back to `end_date_iso`). H1's primary strata use this stated horizon, never the realized one (resolution time minus forecast time), which conditions on the outcome — see PAP 9.31. |
 
 ## Manifest fields (`<path>.meta.json`)
 

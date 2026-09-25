@@ -384,6 +384,9 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                 "volume_24h": state.volume_24h,
                 "hour_utc": datetime.fromisoformat(ts).hour,
                 "trades_24h": None,
+                # The STATED horizon the model saw, frozen with the forecast
+                # (PAP 9.31) -- the only horizon knowable at this moment.
+                "days_to_resolution_at_ts": state.days_to_resolution,
             })
             counts["written"] += 1
             # One short transaction per write, never one spanning the next

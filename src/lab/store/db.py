@@ -16,7 +16,8 @@ from lab.util import PROJECT_ROOT, now_utc_iso
 # forecast contract breaks -- but this value is carried in every paper-export
 # manifest, so it is bumped rather than left silently drifting behind the real
 # shape of the database.
-SCHEMA_VERSION = "14"
+# "15" adds forecasts.days_to_resolution_at_ts (2026-09-25, PAP 9.31).
+SCHEMA_VERSION = "15"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -635,6 +636,34 @@ def migrate_kalshi_event_clusters(conn: sqlite3.Connection) -> dict[str, int]:
     return {"markets_linked": len(updates), "events": len(events)}
 
 
+def migrate_forecast_horizon(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Freeze each forecast's STATED time-to-resolution with it (2026-09-25).
+
+    CLAUDE.md §6 lists "horizon bucket stored with each forecast" among M1's
+    guards, and it was never done: M1 picked its curve from the market's
+    stated end date at forecast time and kept that number nowhere. The
+    evaluation therefore had to recompute a horizon after the fact, and it
+    used the REALIZED one -- resolution time minus forecast time. That
+    conditions on the outcome: "will X happen by date" markets resolve early
+    precisely when X happens, so markets stated as long-dated that resolved
+    early were 87-91% YES (measured 2026-09-25), and bucketing by realized
+    horizon moves them out of the long buckets. Under the realized definition
+    the >=30-day bucket showed price minus outcome +0.026; under the stated
+    one, -0.009 -- a miscalibration manufactured by the bucketing, in the
+    direction H1 predicts. It also inherited the resolution watcher's
+    recording lag, since `resolved_ts` is when the lab recorded the outcome.
+
+    Nullable and forward-only, like every Phase 15 covariate: rows written
+    before this migration keep NULL, and analyses fall back to the market's
+    current end date for them (disclosed in PAP 9.31).
+    """
+    added = not _column_exists(conn, "forecasts", "days_to_resolution_at_ts")
+    if added:
+        conn.execute("ALTER TABLE forecasts ADD COLUMN days_to_resolution_at_ts REAL")
+    conn.commit()
+    return {"days_to_resolution_at_ts": added}
+
+
 def migrate_kalshi_series_cursor(conn: sqlite3.Connection) -> dict[str, bool]:
     """Idempotent 2026-09-08 migration: give the Kalshi universe sync its own
     rotation cursor, because it had been inferring one from data it does not
@@ -714,6 +743,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_microstructure_covariates(conn)
     migrate_kalshi_event_clusters(conn)
     migrate_kalshi_series_cursor(conn)
+    migrate_forecast_horizon(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
@@ -906,11 +936,13 @@ def append_forecast(conn: sqlite3.Connection, row: dict) -> int:
         INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts,
                                spread_at_ts, inputs_hash, evidence_run_id, cost_usd,
                                m3_randomized, m3_random_seed,
-                               depth_covariate, volume_24h, trades_24h, hour_utc)
+                               depth_covariate, volume_24h, trades_24h, hour_utc,
+                               days_to_resolution_at_ts)
         VALUES (:ts, :condition_id, :model_id, :p_yes, :p_market_at_ts,
                 :spread_at_ts, :inputs_hash, :evidence_run_id, :cost_usd,
                 :m3_randomized, :m3_random_seed,
-                :depth_covariate, :volume_24h, :trades_24h, :hour_utc)
+                :depth_covariate, :volume_24h, :trades_24h, :hour_utc,
+                :days_to_resolution_at_ts)
         """,
         {
             "spread_at_ts": None,
@@ -925,6 +957,7 @@ def append_forecast(conn: sqlite3.Connection, row: dict) -> int:
             "volume_24h": None,
             "trades_24h": None,
             "hour_utc": None,
+            "days_to_resolution_at_ts": None,
             **row,
         },
     )

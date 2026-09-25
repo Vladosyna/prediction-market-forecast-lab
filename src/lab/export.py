@@ -41,6 +41,12 @@ EXPORT_PAPER_FIELDS = [
     # `trades_24h` NULL throughout: no venue reports a 24h trade count on the
     # objects the collector already fetches. See docs/paper_export_schema.md.
     "depth_covariate", "volume_24h", "trades_24h", "hour_utc",
+    # The inputs to H1's primary horizon strata (PAP 9.31, 2026-09-25): the
+    # stated horizon frozen at forecast time where it exists, and the market's
+    # end date for the fallback on rows written before it was frozen. Without
+    # them a replicator could only rebuild the realized-horizon buckets --
+    # the outcome-conditioned definition the lab stopped using as primary.
+    "end_date_iso", "days_to_resolution_at_ts",
 ]
 
 

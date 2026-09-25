@@ -205,7 +205,12 @@ def m1_resolved_rows(conn, limit: int | None = None) -> list[dict]:
         """
         SELECT f.condition_id, f.p_market_at_ts AS p_market, r.payout_yes AS outcome,
                r.resolved_ts, m.event_id AS event_id, m.venue AS venue,
-               (julianday(r.resolved_ts) - julianday(f.ts)) AS days_to_resolution
+               -- STATED horizon at forecast time (PAP 9.31), not realized:
+               -- the curve is applied on the stated one, and fitting on the
+               -- realized one both skews train against serve and conditions
+               -- on the outcome ("by date" markets resolve early when YES).
+               COALESCE(f.days_to_resolution_at_ts,
+                        julianday(m.end_date_iso) - julianday(f.ts)) AS days_to_resolution
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id

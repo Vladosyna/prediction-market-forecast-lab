@@ -205,9 +205,12 @@ def _seed_m0(conn, n=60):
     rts = now.isoformat(timespec="seconds")
     for i in range(n):
         cid = f"0x{i}"
+        # A real market has an end date; this one resolves on it, so the
+        # stated horizon (what M1 refits on from PAP 9.31) equals the 3 days
+        # the realized one gave before.
         conn.execute(
-            "INSERT INTO markets (condition_id, question, category, tier, active, closed) "
-            "VALUES (?, ?, 'politics', 'liquid', 1, 1)", (cid, f"Q{i}?"))
+            "INSERT INTO markets (condition_id, question, category, tier, active, closed, "
+            "end_date_iso) VALUES (?, ?, 'politics', 'liquid', 1, 1, ?)", (cid, f"Q{i}?", rts))
         p = 0.58 + (i % 5) * 0.01   # 0.58..0.62 -- extremizing hurts when outcomes are NO
         db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m0_market",
                                   "p_yes": p, "p_market_at_ts": p})

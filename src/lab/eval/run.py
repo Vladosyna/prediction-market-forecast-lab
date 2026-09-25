@@ -99,7 +99,8 @@ def resolved_forecast_rows(
                f.depth_covariate AS depth_covariate, f.volume_24h AS volume_24h,
                f.trades_24h AS trades_24h, f.hour_utc AS hour_utc,
                m.venue AS venue, m.category AS category, m.event_id AS event_id,
-               m.tier AS tier
+               m.tier AS tier, m.end_date_iso AS end_date_iso,
+               f.days_to_resolution_at_ts AS days_to_resolution_at_ts
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id
         JOIN markets m ON m.condition_id = f.condition_id
@@ -254,30 +255,52 @@ def evaluate_model(
 
 
 
-def _horizon_bucket(row: dict) -> str | None:
-    """Which of M1's own horizon buckets a resolved forecast falls in.
-
-    Measured resolution-time minus forecast-time, matching `m1_resolved_rows`'s
-    convention (`julianday(r.resolved_ts) - julianday(f.ts)`) rather than the
-    market's stated end date, so a market that settles early or late is bucketed
-    by what actually happened.
-    """
-    from lab.learn.refit import HORIZON_BUCKETS
-
-    ts, res = row.get("forecast_ts"), row.get("resolved_ts")
-    if not ts or not res:
+def _days_between(start: str | None, end: str | None) -> float | None:
+    if not start or not end:
         return None
     try:
-        days = (datetime.fromisoformat(res.replace("Z", "+00:00"))
-                - datetime.fromisoformat(ts.replace("Z", "+00:00"))).total_seconds() / 86400
+        return (datetime.fromisoformat(end.replace("Z", "+00:00"))
+                - datetime.fromisoformat(start.replace("Z", "+00:00"))).total_seconds() / 86400
     except ValueError:
         return None
-    if days <= 0:
+
+
+def _bucket_for_days(days: float | None) -> str | None:
+    from lab.learn.refit import HORIZON_BUCKETS
+
+    if days is None or days <= 0:
         return None
     for name, (lo, hi) in HORIZON_BUCKETS.items():
         if lo <= days < hi:
             return name
     return None
+
+
+def _stated_horizon_bucket(row: dict) -> str | None:
+    """The PRIMARY horizon for H1 from 2026-09-25 (PAP 9.31): time to the
+    market's STATED end date at the moment the forecast was made -- the only
+    horizon anyone could know then, and the one M1 itself used to pick a curve.
+
+    Rows frozen from 2026-09-25 carry it (`days_to_resolution_at_ts`); older
+    rows fall back to the market's current end date, a disclosed proxy that
+    differs only where a venue moved the date after the forecast.
+    """
+    days = row.get("days_to_resolution_at_ts")
+    if days is None:
+        days = _days_between(row.get("forecast_ts"), row.get("end_date_iso"))
+    return _bucket_for_days(days)
+
+
+def _realized_horizon_bucket(row: dict) -> str | None:
+    """The definition used until 2026-09-25, now the named sensitivity check
+    ("_hr_" rows, confirmatory window only). Resolution time minus forecast
+    time conditions on the outcome -- "by date" markets resolve early exactly
+    when the event happens, so long realized horizons are NO-enriched -- and
+    it inherits the resolution watcher's recording lag. Measured 2026-09-25 on
+    Polymarket: price minus outcome in the >=30-day bucket was +0.026 under
+    this definition and -0.009 under the stated one. See PAP 9.31.
+    """
+    return _bucket_for_days(_days_between(row.get("forecast_ts"), row.get("resolved_ts")))
 
 
 def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> list[dict[str, Any]]:
@@ -348,19 +371,28 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                 # from a second identical query: this loop is per model x venue
                 # x window and the eval already runs for tens of minutes inside
                 # the collector's own cgroup.
-                by_bucket: dict[str, list[dict]] = {}
-                for row in rows:
-                    bucket = _horizon_bucket(row)
-                    if bucket:
-                        by_bucket.setdefault(bucket, []).append(row)
-                for bucket, bucket_rows in by_bucket.items():
-                    h_summary = evaluate_model(
-                        conn, model_id, f"{label}_h_{bucket}" + label_suffix,
-                        bucket_rows, config, venue=venue,
-                        category=ALL_CATEGORIES, window_days=days,
-                    )
-                    if h_summary:
-                        out.append(h_summary)
+                # "_hs_" = stated horizon, the primary strata (PAP 9.31);
+                # "_hr_" = realized horizon, the pre-2026-09-25 definition,
+                # kept as a named sensitivity check on the confirmatory
+                # sample only. The old "_h_" label is no longer written, so
+                # no eval_runs label changes meaning mid-series.
+                definitions = [("hs", _stated_horizon_bucket)]
+                if label == "confirmatory":
+                    definitions.append(("hr", _realized_horizon_bucket))
+                for tag, bucket_of in definitions:
+                    by_bucket: dict[str, list[dict]] = {}
+                    for row in rows:
+                        bucket = bucket_of(row)
+                        if bucket:
+                            by_bucket.setdefault(bucket, []).append(row)
+                    for bucket, bucket_rows in by_bucket.items():
+                        h_summary = evaluate_model(
+                            conn, model_id, f"{label}_{tag}_{bucket}" + label_suffix,
+                            bucket_rows, config, venue=venue,
+                            category=ALL_CATEGORIES, window_days=days,
+                        )
+                        if h_summary:
+                            out.append(h_summary)
             # (H1 is stated over HORIZON BUCKETS -- "paired Brier skill in the
             # >=30-day horizon buckets", PAP section 2. Until 2026-08-10 nothing
             # computed that: run_eval's dimensions were model x venue x category

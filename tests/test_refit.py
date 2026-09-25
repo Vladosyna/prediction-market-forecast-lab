@@ -234,9 +234,12 @@ def test_refit_statistical_models_runs_end_to_end_with_a_dataframe_training_set(
         # Live holdout: m0_market forecasts on resolved markets.
         for i, r in enumerate(rows[:300]):
             cid = f"0xlive{i:04d}"
+            # End date = the resolution date below, so the stated horizon the
+            # refit now uses (PAP 9.31) is the 31 days the realized one gave.
             conn.execute(
-                "INSERT INTO markets (condition_id, question, category, venue, tier, active, closed)"
-                " VALUES (?,?,?,'polymarket','liquid',0,1)", (cid, "q", r["category"]))
+                "INSERT INTO markets (condition_id, question, category, venue, tier, active, closed,"
+                " end_date_iso) VALUES (?,?,?,'polymarket','liquid',0,1,'2026-02-01T00:00:00+00:00')",
+                (cid, "q", r["category"]))
             conn.execute(
                 "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
                 " VALUES ('2026-01-01T00:00:00+00:00',?, 'm0_market', ?, ?)",
