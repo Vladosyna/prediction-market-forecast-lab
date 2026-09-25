@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -99,7 +99,7 @@ def resolved_forecast_rows(
                f.depth_covariate AS depth_covariate, f.volume_24h AS volume_24h,
                f.trades_24h AS trades_24h, f.hour_utc AS hour_utc,
                m.venue AS venue, m.category AS category, m.event_id AS event_id,
-               m.tier AS tier, m.end_date_iso AS end_date_iso,
+               m.tier AS tier, m.end_date_iso AS end_date_iso, m.neg_risk AS neg_risk,
                f.days_to_resolution_at_ts AS days_to_resolution_at_ts
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id
@@ -303,7 +303,10 @@ def _realized_horizon_bucket(row: dict) -> str | None:
     return _bucket_for_days(_days_between(row.get("forecast_ts"), row.get("resolved_ts")))
 
 
-def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> list[dict[str, Any]]:
+def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
+             row_filter: Callable[[list[dict]], list[dict]] | None = None,
+             suffix: str = "", models: frozenset[str] | set[str] | None = None,
+             ) -> list[dict[str, Any]]:
     """include_disputed=False (default) is the unchanged nightly path.
     include_disputed=True is PAP Addendum 9.2(b)'s robustness re-run: same
     models/venues/categories/windows, disputed markets included instead of
@@ -313,12 +316,16 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
     replacement for it (brief section 9.2(b), section 4.9(i))."""
     from lab.forecast import null_control_ids_by_venue
 
-    label_suffix = "_disputed_inclusive" if include_disputed else ""
+    # `row_filter`/`suffix`/`models` are the pre-registered robustness checks
+    # (ROBUSTNESS_CHECKS below): the identical matrix on a filtered row set,
+    # under its own parallel window_label, never overwriting a primary row.
+    label_suffix = ("_disputed_inclusive" if include_disputed else "") + suffix
+    keep = row_filter or (lambda rows: rows)
 
     nc_ids_by_venue = null_control_ids_by_venue(conn, config)
     model_ids = [r["model_id"] for r in conn.execute(
         "SELECT DISTINCT model_id FROM forecasts ORDER BY model_id"
-    )]
+    ) if models is None or r["model_id"] in models]
     venue_categories: dict[str, list[str]] = {}
     for r in conn.execute(
         """
@@ -346,6 +353,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                         null_control_ids=nc_ids, include_disputed=include_disputed,
                         since_ts=since, apply_exclusions=True,
                     )
+                    rows = keep(rows)
                     summary = evaluate_model(
                         conn, model_id, label + label_suffix, rows, config,
                         venue=venue, category=category, window_days=days,
@@ -360,6 +368,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                     conn, model_id, days, venue=venue, null_control_ids=nc_ids,
                     include_disputed=include_disputed, since_ts=since, apply_exclusions=True,
                 )
+                rows = keep(rows)
                 summary = evaluate_model(
                     conn, model_id, label + label_suffix, rows, config,
                     venue=venue, category=ALL_CATEGORIES, window_days=days,
@@ -410,6 +419,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                 invert_null_control=True, include_disputed=include_disputed,
                 apply_exclusions=True,
             )
+            nc_rows = keep(nc_rows)
             nc_summary = evaluate_model(
                 conn, model_id, "null_control" + label_suffix, nc_rows, config,
                 venue=venue, category=ALL_CATEGORIES, window_days=None,
@@ -418,4 +428,91 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
                 out.append(nc_summary)
     conn.commit()
     log.info("eval complete", extra={"ctx": {"summaries": len(out), "include_disputed": include_disputed}})
+    return out
+
+
+# --- Pre-registered robustness checks (2026-09-25) ---------------------------
+#
+# Each was committed in docs/pre_analysis_plan.md BEFORE the confirmatory
+# analysis, as "the identical model x venue x category x window matrix" on a
+# different row set, "alongside -- never replacing -- the primary result".
+# Until 2026-09-25 only 9.2(b) existed as code; the rest were prose. A check
+# promised before the results are read protects the analysis only if it is
+# implemented before they are read, so they are code now -- run on demand
+# (`lab eval --robustness`), not nightly: each is a full pass of the matrix,
+# and seven of them every night would be the resource failure this project
+# just spent a day undoing. Run them for the confirmatory analysis.
+
+M1_FAMILY = frozenset({"m1_debiased", "m1_hier@polymarket", "m1_hier@kalshi", "m1_hier@metaculus"})
+
+
+def _first_per_market_day(rows: list[dict]) -> list[dict]:
+    """PAP 9.5: the first forecast per (market, model, UTC day) -- the
+    pre-registered cadence. run_eval passes one model's rows at a time, so
+    (market, day) is the key. Deterministic order, so the result -- and the
+    CS computed on it -- does not depend on the query's row order."""
+    seen: set[tuple[str, str]] = set()
+    out = []
+    for r in sorted(rows, key=lambda r: (r["forecast_ts"], r["condition_id"])):
+        key = (r["condition_id"], r["forecast_ts"][:10])
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
+def _before_end_date(rows: list[dict]) -> list[dict]:
+    """PAP 9.11: exclude forecasts written on or after their market's end date."""
+    return [r for r in rows
+            if not ((d := _days_between(r["forecast_ts"], r.get("end_date_iso"))) is not None
+                    and d <= 0)]
+
+
+def _since(day: str) -> Callable[[list[dict]], list[dict]]:
+    return lambda rows: [r for r in rows if r["forecast_ts"][:10] >= day]
+
+
+ROBUSTNESS_CHECKS: dict[str, dict[str, Any]] = {
+    # 9.2(b): disputed resolutions included instead of excluded.
+    "disputed_inclusive": {"pap": "9.2(b)", "include_disputed": True},
+    # 9.5: deduplicated ledger, first forecast per (market, model, day).
+    "dedup_daily": {"pap": "9.5", "suffix": "_dedup_daily", "filter": _first_per_market_day},
+    # 9.11: no forecast written on or after its market's end date.
+    "pre_end_date": {"pap": "9.11", "suffix": "_pre_end_date", "filter": _before_end_date},
+    # 9.18, 9.19, 9.20 (and 9.21, which reuses them): one boundary, 2026-08-18.
+    "since_20260818": {"pap": "9.18-9.21", "suffix": "_since_20260818",
+                       "filter": _since("2026-08-18")},
+    # 9.22: M7 only, from its pair repair on 2026-08-22.
+    "m7_since_20260822": {"pap": "9.22", "suffix": "_since_20260822",
+                          "models": frozenset({"m7_crossvenue"}), "filter": _since("2026-08-22")},
+    # 9.3(a): M1/M1.x split by negRisk. 9.3(b) -- collateral-yield programs --
+    # has no market-level data in this lab (which Polymarket markets were
+    # holding-rewards eligible was never collected; Kalshi's APY is
+    # venue-wide), so the per-venue matrix is the closest available split.
+    "negrisk": {"pap": "9.3(a)", "suffix": "_negrisk", "models": M1_FAMILY,
+                "filter": lambda rows: [r for r in rows if r.get("neg_risk")]},
+    "non_negrisk": {"pap": "9.3(a)", "suffix": "_non_negrisk", "models": M1_FAMILY,
+                    "filter": lambda rows: [r for r in rows if not r.get("neg_risk")]},
+}
+
+
+def run_robustness_checks(conn, config: dict[str, Any],
+                          names: list[str] | None = None) -> dict[str, int]:
+    """Every pre-registered robustness check (or the named subset), each as a
+    full pass of the evaluation matrix under its own window_label suffix.
+    Returns {check: summaries written}."""
+    unknown = set(names or []) - set(ROBUSTNESS_CHECKS)
+    if unknown:
+        raise ValueError(f"unknown robustness check(s): {sorted(unknown)}")
+    out: dict[str, int] = {}
+    for name, spec in ROBUSTNESS_CHECKS.items():
+        if names and name not in names:
+            continue
+        summaries = run_eval(conn, config,
+                             include_disputed=spec.get("include_disputed", False),
+                             row_filter=spec.get("filter"), suffix=spec.get("suffix", ""),
+                             models=spec.get("models"))
+        out[name] = len(summaries)
+        log.info("robustness check complete",
+                 extra={"ctx": {"check": name, "pap": spec["pap"], "summaries": len(summaries)}})
     return out

@@ -157,8 +157,27 @@ def eval(
              "window_label alongside (not replacing) the primary eval_runs rows. "
              "Not part of the nightly job; run manually when the comparison is needed.",
     ),
+    robustness: bool = typer.Option(
+        False, "--robustness",
+        help="Run EVERY robustness check the pre-analysis plan pre-registered "
+             "(9.2b, 9.3a, 9.5, 9.11, 9.18-9.21, 9.22), each as a full pass of the "
+             "matrix under its own window_label suffix. Hours on the VPS -- run it "
+             "for the confirmatory analysis, ideally against a copy of the db.",
+    ),
 ) -> None:
     """Score resolved forecasts: paired Brier/log-loss, skill with bootstrap CIs."""
+    if robustness:
+        from lab.eval.run import run_robustness_checks
+        from lab.store import db
+
+        conn = db.connect(load_config()["storage"]["db_path"])
+        try:
+            done = run_robustness_checks(conn, load_config())
+        finally:
+            conn.close()
+        for name, n in done.items():
+            typer.echo(f"  robustness {name}: {n} summaries")
+        return
     if include_disputed:
         from lab.eval.run import run_eval
         from lab.store import db

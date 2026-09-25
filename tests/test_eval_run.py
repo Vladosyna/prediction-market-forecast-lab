@@ -359,3 +359,78 @@ def test_the_m1_refit_learns_on_the_horizon_it_is_applied_on(config):
     (row,) = m1_resolved_rows(conn)
     assert row["days_to_resolution"] == pytest.approx(60.0, abs=0.01), "stated, not the 5 realized"
     conn.close()
+
+
+# --- pre-registered robustness checks as code (2026-09-25) -------------------
+
+def _mk(conn, cid, venue="polymarket", end="2026-12-31T00:00:00+00:00", neg_risk=0):
+    db.upsert_market(conn, {
+        "condition_id": cid, "venue": venue, "venue_native_id": cid,
+        "slug": None, "question": f"q {cid}", "category": "politics", "description": "d",
+        "end_date_iso": end, "token_id_yes": None, "token_id_no": None,
+        "neg_risk": neg_risk, "active": 1, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "liquid",
+    })
+
+
+def _fc(conn, cid, ts, model="m1_debiased"):
+    db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": model,
+                              "p_yes": 0.6, "p_market_at_ts": 0.5})
+
+
+def test_the_check_filters_do_what_their_addenda_say():
+    from lab.eval.run import _before_end_date, _first_per_market_day, _since
+
+    rows = [
+        {"condition_id": "a", "forecast_ts": "2026-08-20T09:00:00+00:00", "end_date_iso": None},
+        {"condition_id": "a", "forecast_ts": "2026-08-20T02:00:00+00:00", "end_date_iso": None},
+        {"condition_id": "a", "forecast_ts": "2026-08-21T02:00:00+00:00", "end_date_iso": None},
+    ]
+    kept = _first_per_market_day(rows)
+    assert [r["forecast_ts"][:13] for r in kept] == ["2026-08-20T02", "2026-08-21T02"], "9.5"
+
+    late = [{"condition_id": "k", "forecast_ts": "2026-08-12T02:00:00+00:00",
+             "end_date_iso": "2026-08-10T00:00:00Z"},
+            {"condition_id": "k2", "forecast_ts": "2026-08-12T02:00:00+00:00",
+             "end_date_iso": "2026-09-10T00:00:00Z"}]
+    assert [r["condition_id"] for r in _before_end_date(late)] == ["k2"], "9.11"
+
+    assert [r["forecast_ts"][:10] for r in _since("2026-08-21")(rows)] == ["2026-08-21"]
+
+
+def test_every_check_writes_only_under_its_own_label(config):
+    """Alongside, never replacing: a robustness pass must not write a single
+    primary-labelled row, and the model-scoped checks touch only their models."""
+    from lab.eval.run import ROBUSTNESS_CHECKS, run_robustness_checks
+
+    conn = db.connect(config["storage"]["db_path"])
+    _mk(conn, "p:plain")
+    _mk(conn, "p:neg", neg_risk=1)
+    for cid in ("p:plain", "p:neg"):
+        _fc(conn, cid, "2026-09-10T02:00:00+00:00")
+        _fc(conn, cid, "2026-09-10T02:00:00+00:00", model="m7_crossvenue")
+        db.record_resolution(conn, cid, "2026-09-12T00:00:00+00:00", 1.0, False, "gamma")
+    conn.commit()
+
+    done = run_robustness_checks(conn, config)
+    assert set(done) == set(ROBUSTNESS_CHECKS)
+    labels = [(r["model_id"], r["window_label"]) for r in conn.execute(
+        "SELECT model_id, window_label FROM eval_runs")]
+    suffixes = {spec.get("suffix", "") for spec in ROBUSTNESS_CHECKS.values()} - {""}
+    assert all(l.endswith(tuple(suffixes)) or "_disputed_inclusive" in l for _, l in labels), (
+        "a robustness pass wrote a primary-labelled row")
+    assert any(l.endswith("_negrisk") for _, l in labels)
+    assert not any(m == "m7_crossvenue" and l.endswith(("_negrisk", "_non_negrisk"))
+                   for m, l in labels), "9.3(a) is scoped to the M1 family"
+    assert not any(m != "m7_crossvenue" and l.endswith("_since_20260822")
+                   for m, l in labels), "9.22 is scoped to M7"
+    conn.close()
+
+
+def test_an_unknown_check_is_an_error_not_a_silent_skip(config):
+    from lab.eval.run import run_robustness_checks
+
+    conn = db.connect(config["storage"]["db_path"])
+    with pytest.raises(ValueError):
+        run_robustness_checks(conn, config, names=["no_such_check"])
+    conn.close()
