@@ -1232,3 +1232,57 @@ line in `lab status` are where that would show.
 deserves more suspicion, not less, in a study whose claims rest on a pre-registered population —
 hence the scale estimate, the completion date, and the forward-only caveat stated here rather than
 discovered in the data later.
+
+**Addendum 9.30 (2026-09-25).** Kalshi's third coverage blackout, 2026-09-18 to 2026-09-25
+inclusive, declared an exclusion window; with it, the collection failures an audit found running
+concurrently, because they compound one another and the window cannot be understood without them.
+
+**The measurement.** Distinct Kalshi markets receiving forecasts averaged **3,684 a day** from
+2026-09-08 to 09-17 (18,464 rows a day). Across the eight days 09-18 to 09-25 the venue received
+**856 rows on 56 distinct markets in total** — under one percent of normal volume. The 2026-09-25
+02:00 forecast pass skipped **7,914** Kalshi markets on stale prices and **1,686** past their end
+date (156 on 2026-09-07). The coverage watchdog of 2026-08-26 fired on 09-22 (ERROR for
+`m4_ensemble` and `m5_nowcast`); as 9.26 already recorded, nothing carries that signal off the host.
+
+**The causes, each measured.**
+
+1. **The snapshot rounds outgrew the venue's rate budget.** Every Kalshi snapshot cost one request
+   per market. The liquid tier had grown to ~1,800 non-sports markets at two requests each (market
+   and order book) every five minutes — on its own roughly the whole 8 req/s allowance — and the
+   ~8,200-market tail round starved behind it: about an hour per round against a 30-minute interval,
+   94 of 187 firings skipped. The growth is largely the universe expansion this plan itself declared
+   in **9.29**: ~9,000 non-sports Kalshi markets first seen since 2026-09-08. 9.29 named the snapshot
+   round as the constraint to watch; it was exceeded within about ten days, and nobody was watching.
+2. **The universe sync failed 84 of 94 runs** on `database is locked`, so end dates went stale again —
+   9.17's mechanism, behind the 1,686 past-end skips. The analytics writers held write transactions
+   open across slow work (the forecast pass across M3's LLM calls and M5's network requests; eval
+   across every bootstrap for a model), and collector jobs died at `busy_timeout` behind them.
+3. **From 2026-09-24 17:10 the orchestrator was OOM-killed roughly hourly**, interrupting rounds
+   mid-flight: the weekly report had outgrown memory, the catch-up re-ran it every hour, and systemd's
+   default `OOMPolicy=stop` turned each child OOM into a full orchestrator stop.
+
+**The fixes, none of which changes the observed population.** Snapshot rounds now fetch market
+objects about a hundred per request (`/markets?tickers=`), verified field by field against the
+per-market endpoint on the live API — same markets, same fields, same token bucket, so guardrail 8
+is untouched and the change is one of cost, not of what is collected. Any ticker a bulk response
+omits is fetched singly as before. First measurement: the liquid round went from about ten minutes
+to **3 minutes 37 seconds** for 1,802 markets. The forecast pass now closes any open transaction
+before each model's work, eval commits each row as written, the report is excluded from the hourly
+catch-up, batch children are the kernel's preferred OOM victim, and the unit carries
+`OOMPolicy=continue`.
+
+**Standing under this plan.** Not repairable, for 9.17's and 9.26's reason: the ledger is
+append-only. **2026-09-18 to 2026-09-25 inclusive is an exclusion window for any Kalshi-population
+statistic**, excluded rather than down-weighted — the 56 markets that received forecasts are
+whichever ones a starved round and a failing sync happened to leave fresh, a subset selected by the
+defects. Snapshot history for the Kalshi tail over these days is sparse and cannot be recovered.
+
+**Cumulative cost, stated plainly.** Kalshi has now lost **21 of the 81 days** from this plan's
+confirmatory start (2026-07-06) to this addendum — 08-11..16, 08-30, 09-02..07, 09-18..25 — about a
+quarter of the window, on the venue that carries most of H2's P1/P2 population.
+
+**A correction to 9.29.** That addendum called the discovery expansion something that "adds
+observations", which it does, and named the snapshot budget as the thing to watch, which was right.
+What it did not do was bound the expansion by the budget. An expansion of the observed universe must
+come with the collection capacity to observe it; this one did not, and the result was the opposite of
+its stated direction for eight days.
