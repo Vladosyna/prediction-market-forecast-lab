@@ -215,3 +215,71 @@ def test_a_round_with_no_sports_costs_nothing_extra(config, conn):
         "SELECT condition_id, category, venue FROM markets")]
     kept, dropped = drop_unsampled_sports(conn, config, rows)
     assert dropped == 0 and kept is rows
+
+
+# --- bulk snapshot fetch (2026-09-25) ----------------------------------------
+
+class _BulkClient:
+    """Implements both the bulk and the per-market call, counting each."""
+
+    def __init__(self, cap=None, fail_bulk=False):
+        self.cap, self.fail_bulk = cap, fail_bulk
+        self.bulk_calls: list[int] = []
+        self.single_calls: list[str] = []
+
+    def _m(self, ticker):
+        return KalshiMarket.model_validate({
+            "ticker": ticker, "title": "q?", "status": "active", "result": "",
+            "yes_bid_dollars": "0.4500", "yes_ask_dollars": "0.4700",
+            "last_price_dollars": "0.4600",
+        })
+
+    async def markets_by_tickers(self, tickers):
+        self.bulk_calls.append(len(tickers))
+        if self.fail_bulk:
+            raise RuntimeError("transport failure")
+        served = tickers if self.cap is None else tickers[: self.cap]
+        return {t: self._m(t) for t in served}
+
+    async def market(self, ticker):
+        self.single_calls.append(ticker)
+        return self._m(ticker)
+
+
+def _econ_universe(conn, n):
+    for i in range(n):
+        _seed(conn, f"KXCPI-26OCT-T{i}", "economics")
+    conn.commit()
+
+
+def test_a_tail_round_costs_one_request_per_hundred_markets(config, conn):
+    """The tail round was ~8,200 requests an hour against an 8 req/s budget
+    the liquid tier's order books were already spending; the same market
+    objects come back ~100 to a request."""
+    _econ_universe(conn, 250)
+    client = _BulkClient()
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    written = asyncio.run(snapshot_kalshi(client, conn, store, config, tier="tail"))
+    assert written == 250
+    assert sorted(client.bulk_calls) == [50, 100, 100]
+    assert client.single_calls == [], "no per-market request when the bulk call covered it"
+
+
+def test_tickers_the_bulk_call_did_not_return_are_fetched_one_by_one(config, conn):
+    """The venue's cap on tickers per request is undocumented. If it is lower
+    than ours, the remainder must degrade to the old per-market cost -- never
+    to a silent coverage gap in the snapshot archive."""
+    _econ_universe(conn, 30)
+    client = _BulkClient(cap=20)
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    written = asyncio.run(snapshot_kalshi(client, conn, store, config, tier="tail"))
+    assert written == 30
+    assert len(client.single_calls) == 10
+
+
+def test_a_failed_bulk_request_falls_back_to_per_market(config, conn):
+    _econ_universe(conn, 12)
+    client = _BulkClient(fail_bulk=True)
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    written = asyncio.run(snapshot_kalshi(client, conn, store, config, tier="tail"))
+    assert written == 12 and len(client.single_calls) == 12

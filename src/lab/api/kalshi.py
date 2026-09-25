@@ -144,6 +144,29 @@ class KalshiClient(BaseClient):
             asks=_levels(book.get("no_dollars") or book.get("no"), invert=True),
         )
 
+    async def markets_by_tickers(self, tickers: list[str]) -> dict[str, KalshiMarket]:
+        """Up to len(tickers) market objects in ONE request (`/markets?tickers=`).
+
+        The same market objects `market()` returns one at a time -- verified
+        field by field against the live API on 2026-09-25 (bid/ask/price/sizes/
+        open interest/status identical). Returns what the venue returned;
+        callers must treat a ticker absent from the result as "not fetched",
+        not as "does not exist", because the venue's cap on tickers per request
+        is undocumented. Raises on transport failure so the caller can fall
+        back rather than silently snapshotting nothing.
+        """
+        raw = await self.get_json("/markets", params={
+            "tickers": ",".join(tickers), "limit": len(tickers),
+        })
+        out: dict[str, KalshiMarket] = {}
+        for item in (raw.get("markets", []) if isinstance(raw, dict) else []):
+            try:
+                m = KalshiMarket.model_validate(item)
+            except Exception:
+                continue
+            out[m.ticker] = m
+        return out
+
     async def market(self, ticker: str) -> KalshiMarket | None:
         try:
             raw = await self.get_json(f"/markets/{ticker}")

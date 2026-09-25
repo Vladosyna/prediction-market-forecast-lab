@@ -405,6 +405,51 @@ def _top_of_book_usd(price: float | None, size: float | None) -> float | None:
     return float(price) * float(size)
 
 
+KALSHI_BULK_TICKERS = 100
+
+
+async def _prefetch_markets(kalshi, tickers: list[str], sem: asyncio.Semaphore
+                            ) -> dict[str, KalshiMarket]:
+    """Market objects for many tickers at KALSHI_BULK_TICKERS per request.
+
+    Why this exists (2026-09-25): every snapshot round used to spend one
+    request per market, and by September the venue's rounds no longer fit its
+    rate budget. The liquid tier had grown to ~1,800 markets at TWO requests
+    each (market + order book) every 5 minutes -- on its own roughly the whole
+    8 req/s allowance -- leaving the ~8,200-market tail round starved: it
+    took about an hour against a 30-minute interval, half its firings were
+    skipped, and from 2026-09-18 the forecast pass found most Kalshi prices
+    past guardrail 13's 90-minute bound (7,914 skipped on 09-25) -- the third
+    Kalshi blackout. The same market objects come back ~100 to a request, so
+    the tail round drops from ~8,200 requests to ~85, and the liquid round to
+    its order books plus ~18. Same markets, same fields, same token bucket:
+    guardrail 8 is untouched, only the waste goes.
+
+    Best-effort by design: a client without the bulk call (older fakes, other
+    venues) or a failed bulk request just leaves those tickers to the caller's
+    per-market path.
+    """
+    bulk = getattr(kalshi, "markets_by_tickers", None)
+    if bulk is None or not tickers:
+        return {}
+    chunks = [tickers[i:i + KALSHI_BULK_TICKERS]
+              for i in range(0, len(tickers), KALSHI_BULK_TICKERS)]
+
+    async def _chunk(part: list[str]) -> dict[str, KalshiMarket]:
+        async with sem:
+            try:
+                return await bulk(part)
+            except Exception:
+                log.warning("kalshi snapshot: bulk fetch failed -- falling back per market",
+                            extra={"ctx": {"tickers": len(part)}})
+                return {}
+
+    out: dict[str, KalshiMarket] = {}
+    for got in await asyncio.gather(*(_chunk(p) for p in chunks)):
+        out.update(got)
+    return out
+
+
 async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
                                  markets: list[dict], ts_bucket: str,
                                  depth_levels: int = 0, concurrency: int = 1) -> int:
@@ -428,16 +473,23 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
     whatever this is set to; 1 reproduces the old sequential behaviour.
     """
     sem = asyncio.Semaphore(max(1, concurrency))
+    prefetched = await _prefetch_markets(kalshi, [r["venue_native_id"] for r in markets], sem)
 
     async def _one(row: dict) -> dict | None:
         ticker = row["venue_native_id"]
-        async with sem:
-            try:
-                m = await kalshi.market(ticker)
-            except Exception:
-                log.warning("kalshi snapshot: market fetch failed",
-                            extra={"ctx": {"condition_id": row["condition_id"]}})
-                return None
+        m = prefetched.get(ticker)
+        if m is None:
+            # Not in any bulk response (or the client has no bulk call): one
+            # request for this market alone, exactly as every market used to
+            # cost -- so a lower-than-expected venue cap on tickers per
+            # request degrades to the old behaviour, never to a silent gap.
+            async with sem:
+                try:
+                    m = await kalshi.market(ticker)
+                except Exception:
+                    log.warning("kalshi snapshot: market fetch failed",
+                                extra={"ctx": {"condition_id": row["condition_id"]}})
+                    return None
         if m is None or m.yes_price is None:
             return None
         spread = None
