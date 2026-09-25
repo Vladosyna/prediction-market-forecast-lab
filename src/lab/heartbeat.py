@@ -19,8 +19,41 @@ import httpx
 log = logging.getLogger(__name__)
 
 
-async def send_heartbeat(source: str) -> bool:
-    """Ping HEARTBEAT_URL (env var) to signal `source` is alive.
+ALARM_PREFIX = "alarm:"
+
+
+def set_alarm(conn, name: str, reason: str | None) -> None:
+    """Raise (reason) or clear (None) a data-health alarm (2026-09-25).
+
+    Every large loss this project has had was DETECTED and written to a log
+    that nobody read: three Kalshi blackouts (PAP 9.17, 9.26, 9.30 -- 21 of
+    81 confirmatory days) with the coverage watchdog firing ERROR on the first
+    day of the third, and a backup that stopped leaving the host while its
+    heartbeat kept reporting success. The dead-man ping only ever proved the
+    PROCESS was alive. An active alarm now turns the collector's ping into a
+    healthchecks-style `/fail` carrying the reason, so the external monitor --
+    not this code (§12) -- tells the operator that the DATA is failing too.
+    Caller commits."""
+    from lab.store import db
+
+    db.set_meta(conn, f"{ALARM_PREFIX}{name}", reason or "")
+
+
+def active_alarms(conn) -> dict[str, str]:
+    return {r["key"][len(ALARM_PREFIX):]: r["value"] for r in conn.execute(
+        "SELECT key, value FROM meta WHERE key LIKE ? AND value != '' ORDER BY key",
+        (f"{ALARM_PREFIX}%",))}
+
+
+async def send_heartbeat(source: str, fail_reason: str | None = None) -> bool:
+    """Ping HEARTBEAT_URL (env var) to signal `source` is alive -- or, with
+    `fail_reason`, that it is alive but its data is failing.
+
+    A failure goes to `<HEARTBEAT_URL>/fail` with the reason as the body,
+    which healthchecks.io-class services record and put in the alert. If that
+    request fails (an endpoint without a /fail route), NOTHING is sent: in an
+    alarm state this function never reports success, so at worst the
+    dead-man grace period raises the alert instead.
 
     Returns True on a successful ping, False on a no-op (URL unset) or a
     failed ping. Never raises -- a dead/unreachable monitoring endpoint must
@@ -32,7 +65,15 @@ async def send_heartbeat(source: str) -> bool:
         return False
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.get(url)
+            if fail_reason:
+                resp = await client.post(url.rstrip("/") + "/fail",
+                                         content=fail_reason.encode("utf-8")[:10000])
+                if getattr(resp, "status_code", 200) >= 400:
+                    log.warning("heartbeat /fail rejected -- sending nothing, the grace "
+                                "period will alert", extra={"ctx": {"source": source}})
+                    return False
+            else:
+                await client.get(url)
         return True
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         # httpx.InvalidURL (e.g. a malformed HEARTBEAT_URL typo -- unbalanced

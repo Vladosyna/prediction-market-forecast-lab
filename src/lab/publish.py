@@ -476,7 +476,28 @@ def publish_results(
     _run_git(["add", "-A"], results_dir)
     diff = _run_git(["diff", "--cached", "--quiet"], results_dir)
     if diff.returncode == 0:
-        return {"committed": False, "reason": "no_changes"}
+        # "Nothing new to commit" is NOT "everything is on the remote": a
+        # commit refused last night is still sitting here unpushed. Retry it,
+        # and report pushed=True only when nothing on this host is missing
+        # from the remote (2026-09-25 -- treating no_changes as backed up
+        # cleared the backup alarm the night after a refusal).
+        out: dict[str, Any] = {"committed": False, "reason": "no_changes"}
+        if push:
+            ahead = _run_git(["rev-list", "--count", "@{u}..HEAD"], results_dir)
+            try:
+                n_ahead = int((ahead.stdout or "0").strip() or 0) if ahead.returncode == 0 else 0
+            except ValueError:
+                n_ahead = 0
+            if n_ahead:
+                pushed = _run_git(["push"], results_dir)
+                out.update(unpushed_commits=n_ahead, pushed=pushed.returncode == 0)
+                if pushed.returncode != 0:
+                    out["push_stderr"] = pushed.stderr
+                    log.error("results push REFUSED again -- %d commit(s) still not off the host",
+                              n_ahead, extra={"ctx": {"stderr": (pushed.stderr or "")[-500:]}})
+            else:
+                out["pushed"] = True
+        return out
 
     ts = now_utc_iso()
     commit = _run_git(["commit", "-m", f"Results update {ts}"], results_dir)

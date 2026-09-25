@@ -340,6 +340,9 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     }
     out["forecast_rows"] = conn.execute("SELECT COUNT(*) AS n FROM forecasts").fetchone()["n"]
     out["coverage_regressions"] = coverage_regressions(conn)
+    from lab.heartbeat import active_alarms
+
+    out["alarms"] = active_alarms(conn)
     out["resolutions"] = conn.execute("SELECT COUNT(*) AS n FROM resolutions").fetchone()["n"]
 
     # Snapshot freshness + gaps per tier.
@@ -523,6 +526,9 @@ def format_status(status: dict[str, Any]) -> str:
         f"  markets by tier: {status['markets_by_tier'] or 'none'}",
         f"  forecast rows: {status['forecast_rows']}   resolutions: {status['resolutions']}",
     ]
+    for name, reason in (status.get("alarms") or {}).items():
+        # These are what the heartbeat is currently reporting as /fail.
+        lines.append(f"  !! ALARM [{name}] (heartbeat reporting FAIL): {reason}")
     regs = status.get("coverage_regressions") or []
     if regs:
         lines.append(f"  !! COVERAGE REGRESSION on {regs[0]['day']} -- {len(regs)} model/venue series:")

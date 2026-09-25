@@ -234,7 +234,17 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
     # deliberately dropped data/PAUSE for maintenance, the operator should NOT
     # get a false "collector is dead" alert. So it pings every tick, PAUSE or not.
     async def job_heartbeat_ping() -> None:
-        await send_heartbeat("collector")
+        # Alive AND healthy, or alive with the reason it is not (2026-09-25):
+        # an active data-health alarm turns this ping into /fail. A read of a
+        # few meta rows on the shared connection -- instant, never a write.
+        from lab.heartbeat import active_alarms
+
+        try:
+            alarms = active_alarms(conn)
+        except Exception:
+            alarms = {}
+        reason = "; ".join(f"{k}: {v}" for k, v in alarms.items()) or None
+        await send_heartbeat("collector", fail_reason=reason)
 
     _add_interval_job(scheduler, job_heartbeat_ping,
                       config.get("ops", {}).get("heartbeat_interval_minutes", 5),

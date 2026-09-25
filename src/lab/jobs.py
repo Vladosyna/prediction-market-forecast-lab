@@ -61,6 +61,15 @@ def run_forecast_job(config: dict[str, Any]) -> dict[str, Any]:
         for r in regressions:
             log.error("coverage regression: model wrote far below its own trailing median",
                       extra={"ctx": r})
+        # Raised until a nightly run finds none -- see heartbeat.set_alarm.
+        from lab.heartbeat import set_alarm
+
+        set_alarm(conn, "coverage", (
+            f"{ts[:10]}: {len(regressions)} model/venue series below 50% of their own "
+            "median -- " + ", ".join(
+                f"{r['model_id']}@{r['venue']} {r['n']}/{r['baseline']}" for r in regressions[:6])
+        ) if regressions else None)
+        conn.commit()
     finally:
         conn.close()
     log.info("forecast job complete", extra={"ctx": counts})
@@ -293,16 +302,31 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
         # backup heartbeat was sent unconditionally -- so from 09-24 the
         # external monitor was told the backup was healthy every night while
         # GitHub refused every push and nothing left the host.
-        backed_up = bool(result.get("pushed")) or result.get("reason") == "no_changes"
+        backed_up = bool(result.get("pushed"))
         if include_db and result.get("pushed"):
             db.set_meta(conn, "last_raw_db_push_ts", now_utc_iso())
         if include_reference and result.get("pushed"):
             db.set_meta(conn, "last_reference_push_ts", now_utc_iso())
+        from lab.heartbeat import active_alarms, send_heartbeat, set_alarm
+
         if backed_up:
-            from lab.heartbeat import send_heartbeat
+            set_alarm(conn, "backup", None)
             asyncio.run(send_heartbeat("backup"))
+        elif (result.get("committed") or result.get("unpushed_commits"))                 and not active_alarms(conn).get("backup"):
+            # First refusal only: "since" must keep meaning the FIRST one.
+            set_alarm(conn, "backup", f"results push refused since {now_utc_iso()}: "
+                      + (result.get("push_stderr") or "")[-300:].strip())
+        conn.commit()
     except Exception:
         log.exception("publish job failed")
+        try:
+            from lab.heartbeat import active_alarms, set_alarm
+
+            if not active_alarms(conn).get("backup"):
+                set_alarm(conn, "backup", f"publish job crashed since {now_utc_iso()}")
+                conn.commit()
+        except Exception:
+            pass
         return {"error": "publish_failed"}
     finally:
         conn.close()

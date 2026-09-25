@@ -708,3 +708,39 @@ def test_reference_tables_carry_only_what_the_ledger_needs(config):
     sync_reference_tables(results, conn)
     assert path.read_bytes() == first, "sync churn must not change the file"
     conn.close()
+
+
+def test_a_refused_push_raises_the_backup_alarm_and_a_good_push_clears_it(config, monkeypatch):
+    """The shared heartbeat URL is pinged every 5 minutes by the collector,
+    so merely skipping the backup ping signalled nothing. The alarm is what
+    turns the collector's own ping into /fail until the backup recovers."""
+    import lab.publish as pub
+    from lab.heartbeat import active_alarms
+
+    real_run_git = pub._run_git
+    refuse = {"on": True}
+
+    def maybe_refuse(args, cwd):
+        if args[:1] == ["push"] and refuse["on"]:
+            return subprocess.CompletedProcess(args, 1, "", "exceeded its LFS budget")
+        return real_run_git(args, cwd)
+
+    monkeypatch.setattr(pub, "_run_git", maybe_refuse)
+    run_publish_job(config)
+    conn = db.connect(config["storage"]["db_path"])
+    first = active_alarms(conn).get("backup")
+    assert first and "refused since" in first
+    conn.close()
+
+    run_publish_job(config)          # still refused: "since" keeps the FIRST time
+    conn = db.connect(config["storage"]["db_path"])
+    assert active_alarms(conn).get("backup") == first
+    conn.close()
+
+    refuse["on"] = False
+    Path(config["storage"]["reports_dir"]).mkdir(parents=True, exist_ok=True)
+    (Path(config["storage"]["reports_dir"]) / "touch.txt").write_text("x")
+    run_publish_job(config)
+    conn = db.connect(config["storage"]["db_path"])
+    assert "backup" not in active_alarms(conn)
+    conn.close()
