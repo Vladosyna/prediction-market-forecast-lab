@@ -38,7 +38,7 @@ from lab.api.kalshi import KalshiClient, KalshiMarket
 from lab.collect.categories import load_categories
 from lab.store import db
 from lab.store.snapshots import SnapshotStore, floor_ts_bucket
-from lab.util import now_utc, now_utc_iso
+from lab.util import now_utc, now_utc_iso, parse_venue_ts
 
 log = logging.getLogger(__name__)
 
@@ -663,6 +663,7 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
             payout_yes=payout_yes,
             disputed=False,
             source="kalshi",
+            venue_resolved_ts=parse_venue_ts(m.settlement_ts),
         )
         recorded += 1
         # Commit per-candidate: avoids holding one long write transaction open

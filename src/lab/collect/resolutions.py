@@ -14,7 +14,7 @@ import logging
 
 from lab.api.gamma import GammaClient, GammaMarket
 from lab.store import db
-from lab.util import now_utc_iso
+from lab.util import now_utc_iso, parse_venue_ts
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +162,7 @@ async def watch_resolutions(gamma: GammaClient, conn, limit: int = 200) -> int:
             payout_yes=payout_yes,
             disputed=disputed,
             source="gamma",
+            venue_resolved_ts=parse_venue_ts(m.closed_time),
         )
         recorded += 1
         # Commit per-candidate: at limit=3000 a single end-of-loop commit would

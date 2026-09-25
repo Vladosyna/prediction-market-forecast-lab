@@ -93,7 +93,7 @@ def resolved_forecast_rows(
     everywhere with no inclusive path to re-run instead)."""
     query = """
         SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts,
-               r.payout_yes, r.resolved_ts,
+               r.payout_yes, r.resolved_ts, r.venue_resolved_ts AS venue_resolved_ts,
                f.ts AS forecast_ts, f.m3_randomized AS m3_randomized,
                f.m3_random_seed AS m3_random_seed,
                f.depth_covariate AS depth_covariate, f.volume_24h AS volume_24h,
@@ -308,7 +308,10 @@ def _realized_horizon_bucket(row: dict) -> str | None:
     Polymarket: price minus outcome in the >=30-day bucket was +0.026 under
     this definition and -0.009 under the stated one. See PAP 9.31.
     """
-    return _bucket_for_days(_days_between(row.get("forecast_ts"), row.get("resolved_ts")))
+    # The venue's own resolution time where it was recorded (from 2026-09-25),
+    # so at least the watcher's lag stops leaking into this definition.
+    resolved = row.get("venue_resolved_ts") or row.get("resolved_ts")
+    return _bucket_for_days(_days_between(row.get("forecast_ts"), resolved))
 
 
 def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,

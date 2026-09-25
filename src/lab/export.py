@@ -47,6 +47,9 @@ EXPORT_PAPER_FIELDS = [
     # them a replicator could only rebuild the realized-horizon buckets --
     # the outcome-conditioned definition the lab stopped using as primary.
     "end_date_iso", "days_to_resolution_at_ts",
+    # The venue's own resolution time (2026-09-25 onward; NULL before), beside
+    # `resolved_ts`, which is when the lab's watcher recorded the outcome.
+    "venue_resolved_ts",
 ]
 
 

@@ -46,6 +46,7 @@ else needs redacting.
 | `hour_utc` | int (0–23) or null | Hour of day, UTC, at freeze time. Derivable from `forecast_ts`, stored because CLAUDE.md §5's schema names it. Null before 2026-08-10. |
 | `end_date_iso` | string or null | The market's end date **as recorded when the export ran** (venues occasionally move it). Used for H1's primary horizon strata on rows that predate `days_to_resolution_at_ts` — stated horizon = `end_date_iso` − `forecast_ts`. |
 | `days_to_resolution_at_ts` | float or null | Days from the forecast to the market's stated end date, **frozen at forecast time** — the horizon the model itself used. Null on every row frozen before 2026-09-25 (forward-only; fall back to `end_date_iso`). H1's primary strata use this stated horizon, never the realized one (resolution time minus forecast time), which conditions on the outcome — see PAP 9.31. |
+| `venue_resolved_ts` | string or null | The venue's **own** resolution/settlement time (Kalshi `settlement_ts`, Gamma `closedTime`), normalised to UTC. Null on every resolution recorded before 2026-09-25. Distinct from `resolved_ts`, which is when the lab's watcher *recorded* the outcome and trails the venue by days when the watcher is behind (p90 16 days on Polymarket, measured 2026-09-25). Prefer this one for any timing analysis where it exists. |
 
 ## Manifest fields (`<path>.meta.json`)
 

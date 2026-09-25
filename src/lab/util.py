@@ -46,6 +46,36 @@ def now_utc_iso() -> str:
     return now_utc().isoformat(timespec="seconds")
 
 
+_VENUE_TS = re.compile(
+    r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*(Z|[+-]\d{2}(?::?\d{2})?(?::\d{2})?)?$")
+
+
+def parse_venue_ts(value: str | None) -> str | None:
+    """A venue's own timestamp, normalised to this lab's form
+    ("YYYY-MM-DDTHH:MM:SS+00:00", UTC) -- or None if it cannot be read.
+
+    Venues do not agree with each other or with themselves. Seen live on
+    2026-09-25: Kalshi `settlement_ts` "2026-09-14T13:35:38.40392Z"; Gamma
+    `closedTime` "2026-09-25 06:26:15+00" and "2026-09-25 06:35:18.320219+00";
+    Gamma `umaEndDate` "2026-09-25 06:35:18.320219+00:00:00". Only UTC offsets
+    have ever been observed; anything else is returned as None rather than
+    silently shifted, because a wrong resolution time is worse than none.
+    """
+    if not value:
+        return None
+    m = _VENUE_TS.match(value.strip())
+    if not m:
+        return None
+    day, clock, offset = m.groups()
+    if offset not in (None, "Z") and offset.replace(":", "").lstrip("+-").strip("0"):
+        return None
+    try:
+        parsed = datetime.fromisoformat(f"{day}T{clock}").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return parsed.isoformat(timespec="seconds")
+
+
 def load_config(path: Path | None = None) -> dict[str, Any]:
     config_path = path or DEFAULT_CONFIG_PATH
     with open(config_path, encoding="utf-8") as f:

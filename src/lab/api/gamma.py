@@ -62,6 +62,9 @@ class GammaMarket(BaseModel):
         default_factory=list, alias="umaResolutionStatuses"
     )
     start_date_iso: str | None = Field(default=None, alias="startDate")
+    # The venue's own close/resolution time (2026-09-25); formats vary, see
+    # util.parse_venue_ts. Recorded as resolutions.venue_resolved_ts.
+    closed_time: str | None = Field(default=None, alias="closedTime")
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
 

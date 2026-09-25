@@ -163,3 +163,33 @@ def test_backlog_size_counts_the_watchers_real_working_set(conn):
     assert resolution_backlog_size(conn) == 2
     assert set(unresolved_closed_markets(conn, limit=10)) == {
         "closed_one", "past_end_not_closed"}
+
+
+# --- venue resolution time (2026-09-25) ---------------------------------------
+
+def test_venue_timestamps_in_every_observed_format_normalise_to_utc():
+    from lab.util import parse_venue_ts
+
+    assert parse_venue_ts("2026-09-14T13:35:38.40392Z") == "2026-09-14T13:35:38+00:00"
+    assert parse_venue_ts("2026-09-25 06:26:15+00") == "2026-09-25T06:26:15+00:00"
+    assert parse_venue_ts("2026-09-25 06:35:18.320219+00") == "2026-09-25T06:35:18+00:00"
+    assert parse_venue_ts("2026-09-25 06:35:18.320219+00:00:00") == "2026-09-25T06:35:18+00:00"
+    assert parse_venue_ts("2026-09-25T06:35:18+00:00") == "2026-09-25T06:35:18+00:00"
+    # a non-UTC offset has never been seen; refuse it rather than shift it
+    assert parse_venue_ts("2026-09-25 06:35:18+05") is None
+    assert parse_venue_ts("") is None and parse_venue_ts(None) is None
+    assert parse_venue_ts("not a time") is None
+
+
+def test_the_venue_time_is_recorded_and_never_erased_by_a_replay(tmp_path):
+    from lab.store import db as dbm
+
+    conn = dbm.connect(tmp_path / "lab.db")
+    conn.execute("INSERT INTO markets (condition_id, question) VALUES ('c', 'q')")
+    dbm.record_resolution(conn, "c", "2026-09-25T07:00:00+00:00", 1.0, False, "gamma",
+                          venue_resolved_ts="2026-09-20T12:00:00+00:00")
+    dbm.record_resolution(conn, "c", "2026-09-25T07:30:00+00:00", 1.0, False, "gamma")
+    row = conn.execute("SELECT resolved_ts, venue_resolved_ts FROM resolutions").fetchone()
+    assert row["venue_resolved_ts"] == "2026-09-20T12:00:00+00:00"
+    assert row["resolved_ts"] == "2026-09-25T07:30:00+00:00"
+    conn.close()

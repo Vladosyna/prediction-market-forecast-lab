@@ -17,7 +17,8 @@ from lab.util import PROJECT_ROOT, now_utc_iso
 # manifest, so it is bumped rather than left silently drifting behind the real
 # shape of the database.
 # "15" adds forecasts.days_to_resolution_at_ts (2026-09-25, PAP 9.31).
-SCHEMA_VERSION = "15"
+# "16" adds resolutions.venue_resolved_ts (2026-09-25).
+SCHEMA_VERSION = "16"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -636,6 +637,26 @@ def migrate_kalshi_event_clusters(conn: sqlite3.Connection) -> dict[str, int]:
     return {"markets_linked": len(updates), "events": len(events)}
 
 
+def migrate_venue_resolved_ts(conn: sqlite3.Connection) -> dict[str, bool]:
+    """Record the VENUE's resolution time beside the lab's (2026-09-25).
+
+    `resolved_ts` has always been `now_utc_iso()` at the moment a watcher
+    noticed the outcome -- the lab's recording time, not the venue's
+    resolution time. On Polymarket NO resolutions it trailed the market's end
+    date by p50 0.8 days, p90 16.2, and when the watchers were failing on
+    write locks that gap was operational noise inside every horizon bucket and
+    the CS's sequential order. Both venues publish their own time on the
+    object the watcher already fetches (Kalshi `settlement_ts`, Gamma
+    `closedTime`); it was simply never kept. Nullable, forward-only; the lab's
+    own `resolved_ts` keeps its meaning.
+    """
+    added = not _column_exists(conn, "resolutions", "venue_resolved_ts")
+    if added:
+        conn.execute("ALTER TABLE resolutions ADD COLUMN venue_resolved_ts TEXT")
+    conn.commit()
+    return {"venue_resolved_ts": added}
+
+
 def migrate_forecast_horizon(conn: sqlite3.Connection) -> dict[str, bool]:
     """Freeze each forecast's STATED time-to-resolution with it (2026-09-25).
 
@@ -744,6 +765,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_kalshi_event_clusters(conn)
     migrate_kalshi_series_cursor(conn)
     migrate_forecast_horizon(conn)
+    migrate_venue_resolved_ts(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )
@@ -903,17 +925,24 @@ def record_resolution(
     payout_yes: float,
     disputed: bool,
     source: str,
+    venue_resolved_ts: str | None = None,
 ) -> None:
-    """At-least-once, idempotent: replays of the same final payout are no-ops."""
+    """At-least-once, idempotent: replays of the same final payout are no-ops.
+
+    `venue_resolved_ts` is the venue's own resolution time when it supplied
+    one; a replay without it never erases a value already recorded."""
     conn.execute(
         """
-        INSERT INTO resolutions (condition_id, resolved_ts, payout_yes, disputed, source)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO resolutions (condition_id, resolved_ts, payout_yes, disputed, source,
+                                 venue_resolved_ts)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(condition_id) DO UPDATE SET
             resolved_ts=excluded.resolved_ts, payout_yes=excluded.payout_yes,
-            disputed=excluded.disputed, source=excluded.source
+            disputed=excluded.disputed, source=excluded.source,
+            venue_resolved_ts=COALESCE(excluded.venue_resolved_ts,
+                                       resolutions.venue_resolved_ts)
         """,
-        (condition_id, resolved_ts, payout_yes, int(disputed), source),
+        (condition_id, resolved_ts, payout_yes, int(disputed), source, venue_resolved_ts),
     )
     # A resolved market is closed by definition, and nothing else reliably says
     # so: a venue's market listing simply stops returning it, so the universe
