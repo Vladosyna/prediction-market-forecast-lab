@@ -65,14 +65,35 @@ def test_sample_only_contains_forecastable_markets(conn):
     )
 
 
-def test_sample_respects_configured_size(conn):
+def test_sample_respects_the_configured_size_per_venue(conn):
+    """Per venue since 2026-09-25 (PAP 9.34): each venue gets exactly its own
+    configured count, however lopsided the pools are."""
     config = load_config()
-    size = config["universe"]["null_control"]["sample_size"]
-    for i in range(size * 3):
-        _seed_market(conn, f"live_{i}", tier="liquid")
+    sizes = config["universe"]["null_control"]["sample_size_per_venue"]
+    for venue, size in sizes.items():
+        for i in range(size * 3):
+            _seed_market(conn, f"{venue}:live_{i}", venue=venue, tier="liquid")
     conn.commit()
 
-    assert len(null_control_ids(conn, config)) == size
+    ids = null_control_ids(conn, config)
+    for venue, size in sizes.items():
+        assert sum(1 for c in ids if c.startswith(f"{venue}:")) == size
+
+
+def test_a_huge_pool_on_one_venue_cannot_crowd_out_the_other(conn):
+    """The pooled draw of 30 gave Polymarket an expected 0.66 of a market once
+    Kalshi listed 42,222 sports markets against Polymarket's 952 -- the flood
+    on one venue silently emptied the other venue's control."""
+    config = load_config()
+    for i in range(3000):
+        _seed_market(conn, f"kalshi:k{i}", venue="kalshi", tier="tail")
+    for i in range(60):
+        _seed_market(conn, f"polymarket:p{i}", venue="polymarket", tier="tail")
+    conn.commit()
+
+    ids = null_control_ids(conn, config)
+    poly = {c for c in ids if c.startswith("polymarket:")}
+    assert len(poly) == 60, "every eligible Polymarket market when the pool is below the target"
 
 
 def test_sample_is_deterministic_for_a_fixed_pool(conn):

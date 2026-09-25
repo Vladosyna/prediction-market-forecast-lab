@@ -51,7 +51,18 @@ universe:
   # Null control: random sample of sports markets, cheap models only.
   null_control:
     category: sports
-    sample_size: 30
+    # Per venue from 2026-09-25 (PAP 9.34). One pooled draw of 30 let the
+    # venue with the bigger sports pool crowd the other out of its OWN
+    # control: with 42,222 eligible Kalshi sports markets against 952 on
+    # Polymarket, Polymarket's expected share of the sample was 0.66 of a
+    # market. And 30 was too few to be a test at all -- the realized null
+    # control could only detect harness bias above ~0.07 Brier (Polymarket)
+    # or ~0.12 (Kalshi), 10-20x any plausible real effect. 150 per venue
+    # targets roughly +/-0.02-0.03 by the freeze. Cheap models only: M3/M3b
+    # forecast their own target lists, which exclude sports.
+    sample_size_per_venue:
+      polymarket: 150
+      kalshi: 150
     random_seed: 42
     # Whether the venue-wide snapshot rounds also collect the sports markets
     # that are NOT in the sample. false from 2026-09-07 (PAP 9.26), wired to

@@ -1396,3 +1396,30 @@ commitment to report H1 at the freeze as a bound on the effect as well as a test
 **Direction.** Like 9.25, this correction removes power and was found by auditing whether the study
 can answer its own question. Any Polymarket interval computed before this date is narrower than it
 should have been.
+
+**Addendum 9.34 (2026-09-25).** The sports null control is drawn per venue and five times larger.
+§5's null control is unchanged in purpose — near-efficient markets on which any significant
+"skill" invalidates the run — and this addendum changes only its sample.
+
+**Why it had stopped working.** The control was one seeded draw of 30 from the pooled eligible
+sports markets of both venues. After Kalshi's football listings (9.26), that pool held **42,222
+Kalshi markets against 952 on Polymarket**, so Polymarket's expected share of the sample was **0.66
+of a market**: the flood on one venue silently emptied the other venue's control, and Polymarket's
+null-control accrual effectively stopped. And 30 was too few to test anything. On 2026-09-25 the
+realized control spanned ±0.067 Brier on Polymarket (162 clusters, accumulated through turnover)
+and ±0.12 on Kalshi (52) — able to detect only harness bias far larger than any plausible real
+effect, i.e. a placebo that could not fail.
+
+**The change.** 150 per venue, each venue with its own seeded draw (seed `42:<venue>`), so no
+venue's pool size can crowd another out and adding a venue never reshuffles an existing sample.
+Cheap models only, as before: M3 and M3b forecast their own target lists, which exclude sports, so
+no LLM cost is added. Expected accrual by the freeze brings each venue's null-control interval to
+roughly ±0.02–0.03. Forward-only; the cohort re-draws on deployment, and historical null-control
+scoring is unaffected because membership is read off the ledger.
+
+**A correction to the audit that proposed this.** The audit of 2026-09-25 suggested strengthening
+the control with a permutation test on shuffled outcomes. That is not a valid null for paired Brier
+skill: with outcomes independent of both forecasts, the expected paired difference depends on the
+two forecasts' marginal distributions and is not zero in general — a recalibration model that
+extremizes would be expected to lose, not tie. A larger known-zero sample is the honest way to add
+power to a placebo, so that is what is done.

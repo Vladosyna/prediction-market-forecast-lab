@@ -45,15 +45,35 @@ def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
     re-drawing -- see null_control_ids_by_venue.
     """
     nc = config["universe"]["null_control"]
-    rows = conn.execute(
-        "SELECT condition_id FROM markets WHERE category = ? "
-        "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0 "
-        "ORDER BY condition_id",
-        (nc["category"],),
-    ).fetchall()
-    ids = [r["condition_id"] for r in rows]
-    rng = random.Random(nc["random_seed"])
-    return set(rng.sample(ids, min(nc["sample_size"], len(ids))))
+    per_venue = nc.get("sample_size_per_venue")
+    if per_venue is None:
+        # Legacy pooled draw, for a config written before 2026-09-25.
+        rows = conn.execute(
+            "SELECT condition_id FROM markets WHERE category = ? "
+            "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0 "
+            "ORDER BY condition_id",
+            (nc["category"],),
+        ).fetchall()
+        ids = [r["condition_id"] for r in rows]
+        rng = random.Random(nc["random_seed"])
+        return set(rng.sample(ids, min(nc["sample_size"], len(ids))))
+    # Per venue (PAP 9.34): a pooled draw let Kalshi's 42k sports listings
+    # crowd Polymarket out of its own control. Each venue gets its own seeded
+    # draw -- a derived seed per venue, so adding a venue never reshuffles
+    # another venue's sample.
+    out: set[str] = set()
+    for venue in sorted(per_venue):
+        rows = conn.execute(
+            "SELECT condition_id FROM markets WHERE category = ? "
+            "AND COALESCE(venue, 'polymarket') = ? "
+            "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0 "
+            "ORDER BY condition_id",
+            (nc["category"], venue),
+        ).fetchall()
+        ids = [r["condition_id"] for r in rows]
+        rng = random.Random(f"{nc['random_seed']}:{venue}")
+        out |= set(rng.sample(ids, min(int(per_venue[venue]), len(ids))))
+    return out
 
 
 def drop_null_control_outsiders(conn, config: dict[str, Any],
