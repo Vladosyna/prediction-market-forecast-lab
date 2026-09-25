@@ -232,7 +232,7 @@ def run_pmxt_verify_job(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _db_push_due(conn, interval_days: int) -> bool:
+def _db_push_due(conn, interval_days: int, key: str = "last_raw_db_push_ts") -> bool:
     """True if data/lab.db hasn't been pushed to the results repo in at least
     `interval_days` -- lab.db is a single ever-growing binary blob with no
     LFS delta compression, so pushing it as often as the (cheap, incremental)
@@ -241,7 +241,7 @@ def _db_push_due(conn, interval_days: int) -> bool:
 
     from lab.util import now_utc
 
-    last = db.get_meta(conn, "last_raw_db_push_ts")
+    last = db.get_meta(conn, key)
     if not last:
         return True
     last_dt = datetime.fromisoformat(last)
@@ -279,14 +279,28 @@ def run_publish_job(config: dict[str, Any]) -> dict[str, Any]:
         include_db = bool(raw_cfg.get("db_enabled", False)) and _db_push_due(
             conn, int(raw_cfg.get("db_interval_days", 3))
         )
+        include_reference = bool(raw_cfg.get("reference_enabled", False)) and _db_push_due(
+            conn, int(raw_cfg.get("reference_interval_days", 7)), key="last_reference_push_ts"
+        )
         result = publish_results(
             config, conn, include_snapshots=include_snapshots, include_db=include_db,
             include_env=include_env, include_ledger=include_ledger,
+            include_reference=include_reference,
         )
-        if include_db and result.get("committed"):
+        # Every "it was backed up" marker below requires the push to have
+        # SUCCEEDED, not merely the commit (2026-09-25). Stamping on commit
+        # meant a refused push still counted as this week's db backup, and the
+        # backup heartbeat was sent unconditionally -- so from 09-24 the
+        # external monitor was told the backup was healthy every night while
+        # GitHub refused every push and nothing left the host.
+        backed_up = bool(result.get("pushed")) or result.get("reason") == "no_changes"
+        if include_db and result.get("pushed"):
             db.set_meta(conn, "last_raw_db_push_ts", now_utc_iso())
-        from lab.heartbeat import send_heartbeat
-        asyncio.run(send_heartbeat("backup"))
+        if include_reference and result.get("pushed"):
+            db.set_meta(conn, "last_reference_push_ts", now_utc_iso())
+        if backed_up:
+            from lab.heartbeat import send_heartbeat
+            asyncio.run(send_heartbeat("backup"))
     except Exception:
         log.exception("publish job failed")
         return {"error": "publish_failed"}

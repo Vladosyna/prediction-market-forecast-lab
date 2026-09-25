@@ -357,6 +357,70 @@ def sync_snapshots(results_dir: Path, snapshots_dir: Path) -> int:
     return copied
 
 
+# The columns a reader needs to interpret the mirrored ledger: identity,
+# venue, category, the resolution criteria text, dates, clustering and tier.
+# Deliberately NOT liquidity/volume/last_synced_ts/resolution_checked_ts --
+# they change on every hourly sync without changing what any row means, and
+# including them would make this file differ every single week.
+REFERENCE_MARKET_COLUMNS = (
+    "condition_id", "venue", "venue_native_id", "slug", "question", "category",
+    "description", "end_date_iso", "event_id", "neg_risk", "token_id_yes",
+    "token_id_no", "tier", "active", "closed", "first_seen_ts",
+)
+
+
+def sync_reference_tables(results_dir: Path, conn: sqlite3.Connection) -> dict[str, int]:
+    """The rows needed to READ the mirrored ledger, as plain-git gzip JSONL.
+
+    Replaces the weekly Git LFS push of the whole data/lab.db (2026-09-25).
+    That push had become impossible: the repository exceeded its LFS budget,
+    GitHub refused the upload, and because the refused commit sat at the head
+    of the unpushed range, every nightly ledger increment behind it was stuck
+    on the host too -- nothing reached GitHub from 09-24 03:01 until the range
+    was repaired by hand. LFS was the wrong medium for a monotonically growing
+    blob anyway (no deltas, every version kept forever).
+
+    The ledger increments already mirror forecasts, resolutions and
+    evidence_runs daily. What they do not carry is what a forecast row MEANS:
+    which venue, which category, which event cluster, what the resolution
+    criteria said. So this writes exactly that, and only for markets that
+    carry at least one forecast -- 267,904 market rows were 46.9MB gzipped on
+    2026-09-25, growing by tens of thousands of unforecastable sports listings
+    a week, which would have walked straight back into GitHub's 100MB per-file
+    limit. The forecast-referenced subset is roughly a tenth of that.
+
+    Deterministic bytes (sorted rows, sorted keys, gzip mtime=0), so a week
+    with no metadata change produces an identical file and git stores nothing.
+    """
+    out_dir = results_dir / "reference"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    forecast_markets = "SELECT DISTINCT condition_id FROM forecasts"
+    queries = {
+        "markets": (f"SELECT {', '.join(REFERENCE_MARKET_COLUMNS)} FROM markets "
+                    f"WHERE condition_id IN ({forecast_markets}) ORDER BY condition_id"),
+        "events": ("SELECT * FROM events WHERE event_id IN (SELECT DISTINCT event_id FROM markets "
+                   f"WHERE condition_id IN ({forecast_markets})) ORDER BY event_id"),
+        "model_versions": "SELECT * FROM model_versions ORDER BY id",
+    }
+    counts: dict[str, int] = {}
+    for name, query in queries.items():
+        final = out_dir / f"{name}.jsonl.gz"
+        tmp = out_dir / f"{name}.jsonl.gz.tmp"
+        n = 0
+        try:
+            with open(tmp, "wb") as raw, gzip.GzipFile(
+                    filename=f"{name}.jsonl", mode="wb", fileobj=raw, mtime=0) as gz:
+                for row in conn.execute(query):
+                    gz.write((json.dumps(dict(row), sort_keys=True, separators=(",", ":"),
+                                         ensure_ascii=False) + "\n").encode("utf-8"))
+                    n += 1
+            tmp.replace(final)
+        finally:
+            tmp.unlink(missing_ok=True)
+        counts[name] = n
+    return counts
+
+
 def publish_results(
     config: dict[str, Any],
     conn: sqlite3.Connection,
@@ -366,6 +430,7 @@ def publish_results(
     include_db: bool = False,
     include_env: bool = False,
     include_ledger: bool = False,
+    include_reference: bool = False,
 ) -> dict[str, Any]:
     """Snapshots and the db are independent knobs, not one combined
     "raw data" flag: snapshots are cheap and incremental (only new/changed
@@ -402,6 +467,9 @@ def publish_results(
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])
     if include_db:
         sync_db(results_dir, PROJECT_ROOT / storage["db_path"])
+    n_reference: dict[str, int] = {}
+    if include_reference:
+        n_reference = sync_reference_tables(results_dir, conn)
     if include_env:
         sync_env(results_dir, PROJECT_ROOT / ".env")
 
@@ -417,12 +485,20 @@ def publish_results(
 
     result = {"committed": True, "ts": ts, "snapshot_files_copied": n_snapshots,
              "bootstrap_files_copied": n_bootstrap, "ledger_days_mirrored": n_ledger,
+             "reference_rows": n_reference,
              "db_included": include_db, "env_included": include_env}
     if push:
         pushed = _run_git(["push"], results_dir)
         result["pushed"] = pushed.returncode == 0
         if not result["pushed"]:
             result["push_stderr"] = pushed.stderr
+            # ERROR, not a field inside an INFO "complete" line. From
+            # 2026-09-24 the push was refused every night ("exceeded its LFS
+            # budget") and the only record was that field, inside a line
+            # that read like success. The backup had stopped leaving the host
+            # and nothing on any screen said so.
+            log.error("results push REFUSED -- this night's backup did not leave the host",
+                      extra={"ctx": {"stderr": (pushed.stderr or "")[-500:]}})
         elif include_db:
             result["lfs_prune"] = prune_lfs(results_dir)
     return result

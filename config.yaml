@@ -580,8 +580,25 @@ publish:
   # should stay here -- LFS suits them.
   raw_data:
     snapshots_enabled: true
-    db_enabled: true
+    # OFF from 2026-09-25. The prediction in the comment above came true: the
+    # results repo exceeded its LFS budget, GitHub refused the 09-24 weekly
+    # push of a 2.14GB lab.db, and because that refused commit sat at the head
+    # of the unpushed range, every nightly ledger increment behind it was stuck
+    # on this host too -- nothing reached GitHub from 09-24 03:01 until the
+    # range was repaired by hand (lab.db removed from the pending commit and
+    # added to the mirror's .gitignore). Every future attempt would re-block
+    # the whole mirror the same way. The last full db that did reach GitHub is
+    # the 2026-09-16 push. A full off-host copy of the db needs a store that
+    # is not Git LFS (object storage / restic-class) -- an account decision.
+    db_enabled: false
     db_interval_days: 7
+    # What replaces it inside plain git: the rows needed to READ the mirrored
+    # ledger -- markets that carry forecasts (identity, venue, category,
+    # resolution criteria, event cluster), their events, and model_versions.
+    # See publish.sync_reference_tables. Weekly, stamped only on a push that
+    # actually succeeded.
+    reference_enabled: true
+    reference_interval_days: 7
     # Backs up .env (every API key: DeepSeek/Anthropic, FRED, Metaculus,
     # NewsAPI, HEARTBEAT_URL, PMXT_API_KEY) into the private results repo
     # every night as .env.backup, so losing this laptop doesn't mean

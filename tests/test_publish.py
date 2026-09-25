@@ -29,6 +29,14 @@ def _init_git_repo(path: Path) -> None:
     (path / ".gitkeep").write_text("")
     subprocess.run(["git", "add", "."], cwd=path, capture_output=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=path, capture_output=True)
+    # A real (bare, local) origin, so "the push succeeded" is something a test
+    # can actually observe. Without one every push failed and the tests below
+    # quietly encoded the defect found on 2026-09-25: backup markers stamped
+    # on COMMIT, heartbeat sent whether or not anything left the host.
+    origin = path.parent / f"{path.name}_origin.git"
+    subprocess.run(["git", "init", "--bare", str(origin)], capture_output=True)
+    subprocess.run(["git", "remote", "add", "origin", str(origin)], cwd=path, capture_output=True)
+    subprocess.run(["git", "push", "-u", "origin", "HEAD"], cwd=path, capture_output=True)
 
 
 @pytest.fixture()
@@ -602,4 +610,101 @@ def test_manifest_backfill_refuses_to_certify_a_stale_file(tmp_path, config):
     manifest = (results / "ledger" / "manifest.jsonl").read_text(encoding="utf-8")
     assert "2026-08-21" not in manifest      # refused, not blessed
     assert "2026-08-20" in manifest          # the intact day still gets one
+    conn.close()
+
+
+# --- 2026-09-25: the backup stopped leaving the host and nothing said so -----
+
+def test_a_refused_push_sends_no_backup_heartbeat_and_logs_an_error(config, monkeypatch, caplog):
+    """From 09-24 GitHub refused every push ("exceeded its LFS budget"), the
+    only record was a field inside an INFO "publish job complete" line, and
+    the backup heartbeat went out regardless -- so the external monitor was
+    told every night that a backup which never left the host was healthy."""
+    import logging
+
+    import lab.heartbeat
+    import lab.publish as pub
+
+    calls = []
+
+    async def fake_send_heartbeat(source):
+        calls.append(source)
+        return True
+
+    monkeypatch.setattr(lab.heartbeat, "send_heartbeat", fake_send_heartbeat)
+    real_run_git = pub._run_git
+
+    def refuse_push(args, cwd):
+        if args[:1] == ["push"]:
+            return subprocess.CompletedProcess(
+                args, 1, "", "batch response: This repository exceeded its LFS budget.")
+        return real_run_git(args, cwd)
+
+    monkeypatch.setattr(pub, "_run_git", refuse_push)
+    with caplog.at_level(logging.ERROR, logger="lab.publish"):
+        result = run_publish_job(config)
+
+    assert result.get("committed") is True and result.get("pushed") is False
+    assert calls == [], "no backup heartbeat for a backup that did not leave the host"
+    assert any("REFUSED" in r.getMessage() for r in caplog.records)
+
+
+def test_a_refused_push_does_not_count_as_this_weeks_backup(config, monkeypatch):
+    """The interval stamp used to be set on commit, so a refused push still
+    counted as done and the next attempt waited a full interval."""
+    import lab.publish as pub
+
+    config["publish"]["raw_data"]["reference_enabled"] = True
+    real_run_git = pub._run_git
+    monkeypatch.setattr(pub, "_run_git", lambda args, cwd: (
+        subprocess.CompletedProcess(args, 1, "", "refused") if args[:1] == ["push"]
+        else real_run_git(args, cwd)))
+    run_publish_job(config)
+
+    conn = db.connect(config["storage"]["db_path"])
+    assert db.get_meta(conn, "last_reference_push_ts") is None
+    conn.close()
+
+
+def test_reference_tables_carry_only_what_the_ledger_needs(config):
+    """Replaces the weekly LFS lab.db push. Only markets that carry a forecast,
+    only their events, and none of the columns that change on every sync --
+    so the file cannot creep back toward GitHub's per-file limit, and a
+    quiet week produces byte-identical output that git stores nothing for."""
+    import gzip as _gzip
+    import json
+
+    from lab.publish import REFERENCE_MARKET_COLUMNS, sync_reference_tables
+    from lab.util import now_utc_iso
+
+    conn = db.connect(config["storage"]["db_path"])
+    for cid, forecast in (("with_forecast", True), ("never_forecast", False)):
+        db.upsert_market(conn, {
+            "condition_id": cid, "venue": "kalshi", "venue_native_id": cid,
+            "slug": None, "question": f"q {cid}", "category": "economics",
+            "description": "criteria", "end_date_iso": "2027-01-01T00:00:00Z",
+            "token_id_yes": None, "token_id_no": None, "neg_risk": 0, "active": 1,
+            "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0, "tier": "tail",
+        })
+        if forecast:
+            db.append_forecast(conn, {"ts": now_utc_iso(), "condition_id": cid,
+                                      "model_id": "m0_market", "p_yes": 0.5,
+                                      "p_market_at_ts": 0.5})
+    conn.commit()
+
+    results = Path(config["publish"]["results_dir"])
+    counts = sync_reference_tables(results, conn)
+    assert counts["markets"] == 1
+    path = results / "reference" / "markets.jsonl.gz"
+    rows = [json.loads(line) for line in _gzip.open(path, "rt", encoding="utf-8")]
+    assert [r["condition_id"] for r in rows] == ["with_forecast"]
+    assert set(rows[0]) == set(REFERENCE_MARKET_COLUMNS)
+    assert "last_synced_ts" not in rows[0] and "liquidity_num" not in rows[0]
+
+    first = path.read_bytes()
+    conn.execute("UPDATE markets SET last_synced_ts = '2030-01-01T00:00:00+00:00', "
+                 "liquidity_num = 999")
+    conn.commit()
+    sync_reference_tables(results, conn)
+    assert path.read_bytes() == first, "sync churn must not change the file"
     conn.close()
