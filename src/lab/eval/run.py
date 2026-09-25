@@ -29,6 +29,33 @@ log = logging.getLogger(__name__)
 
 WINDOWS = {"all_time": None, "trailing_90d": 90}
 
+# Pre-registered constants -- deliberately NOT in config.yaml, which is
+# operator-tunable. Both are fixed by docs/pre_analysis_plan.md, and until
+# 2026-09-25 the code applied neither: an audit found every Kalshi statistic,
+# including the anytime-valid CS the PAP says may be read daily, computed over
+# the forecasts the PAP had excluded, and no eval_runs row corresponding to the
+# confirmatory sample §6 defines. A pre-registered rule protects the analysis
+# only once it is code written before the results are read.
+#
+# PAP §6: confirmatory = forecasts made on or after the commitment date.
+CONFIRMATORY_START = "2026-07-06"
+# Forecast-date windows excluded "for any Kalshi-population statistic",
+# inclusive, each with the addendum that declared it.
+KALSHI_EXCLUSION_WINDOWS = (
+    ("2026-08-11", "2026-08-16"),   # PAP 9.17 -- stale end dates blanked the venue
+    ("2026-08-30", "2026-08-30"),   # PAP 9.26 -- sports flood starved the tail round
+    ("2026-09-02", "2026-09-07"),   # PAP 9.26
+    ("2026-09-18", "2026-09-25"),   # PAP 9.30 -- rate budget, lock storm, OOM loop
+)
+# (label, trailing days, since timestamp). "confirmatory" is the pre-registered
+# sample, not a chosen window, so CLAUDE.md §7's "no cherry-picked windows"
+# rule is what requires it rather than what forbids it.
+EVAL_WINDOWS = {
+    "all_time": (None, None),
+    "trailing_90d": (90, None),
+    "confirmatory": (None, CONFIRMATORY_START),
+}
+
 # Sentinel category value for the "all categories pooled, this venue" row --
 # distinct from a legacy pre-Phase-11 eval_runs row's NULL category.
 ALL_CATEGORIES = "ALL"
@@ -52,7 +79,8 @@ def resolved_forecast_rows(
     conn, model_id: str, window_days: int | None,
     venue: str | None = None, category: str | None = None,
     null_control_ids: set[str] | None = None, invert_null_control: bool = False,
-    include_disputed: bool = False,
+    include_disputed: bool = False, since_ts: str | None = None,
+    apply_exclusions: bool = False,
 ) -> list[dict]:
     """Paired rows: forecast + resolution outcome + venue/category/event_id
     for one model, optionally scoped to one venue and/or one category.
@@ -89,6 +117,19 @@ def resolved_forecast_rows(
     if window_days is not None:
         query += " AND f.ts >= ?"
         params.append((now_utc() - timedelta(days=window_days)).isoformat(timespec="seconds"))
+    if since_ts is not None:
+        query += " AND f.ts >= ?"
+        params.append(since_ts)
+    if apply_exclusions and KALSHI_EXCLUSION_WINDOWS:
+        # Off by default so the paper export stays the complete replication
+        # dataset (every row carries forecast_ts, so a replicator applies the
+        # same windows at analysis time -- docs/paper_export_schema.md says
+        # which). run_eval turns it on: the PAP excludes these windows from
+        # "any Kalshi-population statistic", not from the record.
+        spans = " OR ".join("date(f.ts) BETWEEN ? AND ?" for _ in KALSHI_EXCLUSION_WINDOWS)
+        query += f" AND NOT (COALESCE(m.venue, 'polymarket') = 'kalshi' AND ({spans}))"
+        for lo, hi in KALSHI_EXCLUSION_WINDOWS:
+            params += [lo, hi]
     registered_ts = challenger_registered_ts(conn, model_id)
     if registered_ts is not None:
         query += " AND f.ts >= ?"
@@ -276,10 +317,11 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
         for venue, categories in venue_categories.items():
             nc_ids = nc_ids_by_venue.get(venue)
             for category in categories:
-                for label, days in WINDOWS.items():
+                for label, (days, since) in EVAL_WINDOWS.items():
                     rows = resolved_forecast_rows(
                         conn, model_id, days, venue=venue, category=category,
                         null_control_ids=nc_ids, include_disputed=include_disputed,
+                        since_ts=since, apply_exclusions=True,
                     )
                     summary = evaluate_model(
                         conn, model_id, label + label_suffix, rows, config,
@@ -290,10 +332,10 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
             # "ALL categories" aggregate row per venue -- per-category n stays
             # sparse for months (brief section 11 timelines), this keeps a
             # non-sparse view available from day one.
-            for label, days in WINDOWS.items():
+            for label, (days, since) in EVAL_WINDOWS.items():
                 rows = resolved_forecast_rows(
                     conn, model_id, days, venue=venue, null_control_ids=nc_ids,
-                    include_disputed=include_disputed,
+                    include_disputed=include_disputed, since_ts=since, apply_exclusions=True,
                 )
                 summary = evaluate_model(
                     conn, model_id, label + label_suffix, rows, config,
@@ -334,6 +376,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False) -> li
             nc_rows = resolved_forecast_rows(
                 conn, model_id, None, venue=venue, null_control_ids=nc_ids,
                 invert_null_control=True, include_disputed=include_disputed,
+                apply_exclusions=True,
             )
             nc_summary = evaluate_model(
                 conn, model_id, "null_control" + label_suffix, nc_rows, config,

@@ -38,7 +38,11 @@ def _seed(conn, cid, venue, category, n=1):
     db.record_resolution(conn, cid, ts, 1.0, False, "gamma")
 
 
-def test_run_eval_produces_rows_per_venue_and_category(config):
+def test_run_eval_produces_rows_per_venue_and_category(config, monkeypatch):
+    # Grouping, not exclusion policy: `_seed` stamps forecasts "now", and a
+    # "now" inside a declared Kalshi exclusion window (as 2026-09-25 was)
+    # would remove the Kalshi row this test is about.
+    monkeypatch.setattr("lab.eval.run.KALSHI_EXCLUSION_WINDOWS", ())
     conn = db.connect(config["storage"]["db_path"])
     _seed(conn, "poly_econ", "polymarket", "economics")
     _seed(conn, "poly_pol", "polymarket", "politics")
@@ -230,4 +234,61 @@ def test_each_eval_row_is_committed_as_it_is_written(config, monkeypatch):
     monkeypatch.setattr(er, "evaluate_model", spy)
     er.run_eval(conn, config)
     assert open_after_insert and not any(open_after_insert)
+    conn.close()
+
+
+# --- pre-registered windows, enforced in code (2026-09-25) --------------------
+
+def _seed_at(conn, cid, venue, forecast_ts):
+    db.upsert_market(conn, {
+        "condition_id": cid, "venue": venue, "venue_native_id": cid,
+        "slug": None, "question": f"q {cid}", "category": "economics", "description": "d",
+        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
+        "tier": "liquid",
+    })
+    db.append_forecast(conn, {"ts": forecast_ts, "condition_id": cid, "model_id": "m0_market",
+                              "p_yes": 0.6, "p_market_at_ts": 0.5})
+    db.record_resolution(conn, cid, forecast_ts, 1.0, False, "gamma")
+
+
+def _n(conn, venue, label):
+    row = conn.execute(
+        "SELECT n FROM eval_runs WHERE model_id='m0_market' AND venue=? AND window_label=? "
+        "AND category=? ORDER BY id DESC LIMIT 1", (venue, label, ALL_CATEGORIES)).fetchone()
+    return row["n"] if row else 0
+
+
+def test_kalshi_exclusion_windows_bind_every_eval_row_but_not_the_export(config):
+    """PAP 9.17/9.26/9.30 exclude these forecast dates "for any
+    Kalshi-population statistic". Until 2026-09-25 no code applied them, so
+    every Kalshi number -- the daily-read CS included -- contained them. The
+    paper export must stay complete: it is the record, exclusions are analysis."""
+    from lab.export import export_paper_rows
+
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_at(conn, "kalshi:in_917", "kalshi", "2026-08-13T02:00:00+00:00")
+    _seed_at(conn, "kalshi:in_930", "kalshi", "2026-09-20T02:00:00+00:00")
+    _seed_at(conn, "kalshi:clean", "kalshi", "2026-09-10T02:00:00+00:00")
+    _seed_at(conn, "poly:same_day", "polymarket", "2026-08-13T02:00:00+00:00")
+    conn.commit()
+    run_eval(conn, config)
+
+    assert _n(conn, "kalshi", "all_time") == 1, "only the forecast outside every window"
+    assert _n(conn, "polymarket", "all_time") == 1, "the windows are Kalshi's alone"
+    exported = {r["condition_id"] for r in export_paper_rows(conn)}
+    assert {"kalshi:in_917", "kalshi:in_930", "kalshi:clean", "poly:same_day"} <= exported
+    conn.close()
+
+
+def test_the_confirmatory_window_is_the_pap_section_6_sample(config):
+    """PAP §6: confirmatory = forecasts made after the 2026-07-06 commitment.
+    No eval_runs row corresponded to that sample until 2026-09-25."""
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_at(conn, "poly:before", "polymarket", "2026-07-05T23:59:59+00:00")
+    _seed_at(conn, "poly:after", "polymarket", "2026-07-06T00:00:00+00:00")
+    conn.commit()
+    run_eval(conn, config)
+    assert _n(conn, "polymarket", "confirmatory") == 1
+    assert _n(conn, "polymarket", "all_time") == 2
     conn.close()

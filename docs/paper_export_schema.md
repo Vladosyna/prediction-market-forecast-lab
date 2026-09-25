@@ -102,3 +102,24 @@ exports of identical rows are byte-identical.
 The CLI's manual `lab export --paper --out <path>` flow is unaffected and
 still writes plain JSONL — unless you name a path ending in `.gz`, in which
 case it gzips with the same settings.
+
+## Pre-registered analysis windows (apply these yourself)
+
+The export is the complete record: it deliberately **includes** rows that the
+pre-analysis plan excludes from its statistics, because exclusion is an
+analysis decision and the record should not pre-empt it. To reproduce the
+lab's own numbers, apply exactly these rules (they live in code as
+`lab.eval.run.CONFIRMATORY_START` and `KALSHI_EXCLUSION_WINDOWS`):
+
+- **Confirmatory sample** (`docs/pre_analysis_plan.md` §6): `forecast_ts >= 2026-07-06`.
+- **Kalshi exclusion windows** — drop `venue = "kalshi"` rows whose
+  `forecast_ts` date falls in any of (inclusive): 2026-08-11..2026-08-16
+  (PAP 9.17), 2026-08-30 and 2026-09-02..2026-09-07 (PAP 9.26),
+  2026-09-18..2026-09-25 (PAP 9.30). They apply to every Kalshi statistic,
+  the null control included; Polymarket rows are unaffected.
+- **Disputed resolutions** are already absent from the primary export (the
+  query applies `disputed = 0`); the lab's `_disputed_inclusive` robustness
+  rows are computed separately.
+
+These rules were enforced in the lab's own evaluation from 2026-09-25; eval
+rows written before that date do not apply them.
