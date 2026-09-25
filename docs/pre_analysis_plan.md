@@ -1343,3 +1343,22 @@ pre-registered hypothesis with its decision rule unchanged (§3). In addition, a
 before the confirmatory analysis is run, the paper will report the confidence sequence at the freeze
 as a **bound** on long-horizon recalibration skill — the range of effects the data rule out — since
 that is the question these data can actually answer.
+
+**Addendum 9.32 (2026-09-25).** The confidence sequence becomes a deterministic function of the
+data. 9.28 recorded this defect and left it open; it is closed here, before the confirmatory analysis.
+
+The anytime-valid CS (§3, the sole confirmatory statistic) consumes one mean paired difference per
+event cluster, in order of each cluster's first resolution. That order was produced by
+`np.argsort(resolved_ts)` — quicksort, which is unstable — over rows the database returns in no
+defined order. Resolution timestamps have one-second resolution and the watchers record many
+outcomes in the same second, so tied clusters came out in SQLite's physical row order, and the
+sequence, hence the CS path and its final interval, could change after a VACUUM, a new index or a
+restore from backup with no change in the data. Ties are now broken by cluster id
+(`np.lexsort((cluster_id, resolved_ts))`). Resolution-time order is untouched; the estimator,
+its boundary and its variance plug-in are unchanged. A test asserts that permuting the input rows
+leaves the per-cluster sequence and the interval identical. Intervals computed before this date
+may differ from a recomputation in their tie-breaking, and only there.
+
+The fix deliberately does **not** add an `ORDER BY` to the shared resolved-forecast query: making
+the statistic independent of row order is the property that matters, and it now holds whatever
+order the rows arrive in.

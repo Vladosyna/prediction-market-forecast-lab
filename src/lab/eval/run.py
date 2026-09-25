@@ -155,7 +155,15 @@ def _per_cluster_diffs_in_resolution_order(
     resolution -- what the anytime-valid CS treats as its sequential sample
     (brief section 7: "n counts resolved event clusters, not venue-market
     rows")."""
-    order = np.argsort(resolved_ts)
+    # Deterministic order (2026-09-25, PAP 9.32): resolution time, then cluster
+    # id. The previous `np.argsort(resolved_ts)` used quicksort -- unstable --
+    # over rows the query returns in no defined order, so clusters resolving
+    # in the same second came out in SQLite's physical row order, and the
+    # sequence the anytime-valid CS consumes (the pre-registered confirmatory
+    # statistic) could change after a VACUUM or a new index with no change in
+    # data. Resolution-time order is unchanged; only ties are now decided by
+    # the data instead of by storage.
+    order = np.lexsort((np.asarray(cluster_ids, dtype=str), np.asarray(resolved_ts, dtype=str)))
     first_seen: dict[str, int] = {}
     ordered_clusters: list[str] = []
     for idx in order:

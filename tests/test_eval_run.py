@@ -434,3 +434,31 @@ def test_an_unknown_check_is_an_error_not_a_silent_skip(config):
     with pytest.raises(ValueError):
         run_robustness_checks(conn, config, names=["no_such_check"])
     conn.close()
+
+
+def test_the_confidence_sequence_does_not_depend_on_row_order():
+    """The CS is the sole confirmatory statistic. Its input sequence must be a
+    function of the data, not of the order SQLite happens to return rows in --
+    ties in resolved_ts used to be broken by an unstable sort over an
+    unordered query."""
+    import numpy as np
+
+    from lab.eval.anytime import confidence_sequence
+    from lab.eval.run import _per_cluster_diffs_in_resolution_order
+
+    rng = np.random.default_rng(3)
+    n = 400
+    clusters = np.array([f"e{i % 90}" for i in range(n)])
+    # heavy ties: only 12 distinct resolution seconds
+    resolved = [f"2026-09-{10 + (i % 12):02d}T02:00:00+00:00" for i in range(n)]
+    diffs = rng.normal(0.0, 0.1, n)
+
+    base = _per_cluster_diffs_in_resolution_order(diffs, clusters, resolved)
+    ref = confidence_sequence(base)
+    for seed in range(5):
+        perm = np.random.default_rng(seed).permutation(n)
+        got = _per_cluster_diffs_in_resolution_order(
+            diffs[perm], clusters[perm], [resolved[i] for i in perm])
+        np.testing.assert_allclose(got, base)
+        cs = confidence_sequence(got)
+        assert (cs.lo, cs.hi) == pytest.approx((ref.lo, ref.hi))
