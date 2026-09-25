@@ -18,7 +18,7 @@ from lab.collect.status import (
     tier_snapshot_timestamps,
 )
 from lab.eval.calibration import plot_reliability
-from lab.eval.clv import CLV_SNAPSHOT_COLUMNS, build_mid_index, clv_dates, clv_drift
+from lab.eval.clv import clv_dates
 from lab.eval.scoring import honesty_tier
 from lab.store.snapshots import utc_date_str
 from lab.util import PROJECT_ROOT, now_utc, now_utc_iso
@@ -492,24 +492,26 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
     for forecasts in forecasts_by_model.values():
         all_clv_dates |= clv_dates(forecasts, clv_horizons)
         all_clv_cids |= {f["condition_id"] for f in forecasts}
-    clv_snapshots = store.read_range(sorted(all_clv_dates), columns=CLV_SNAPSHOT_COLUMNS,
-                                     condition_ids=all_clv_cids)
+    # In chunks of markets, not one read of all of them (2026-09-25). Every
+    # render from 2026-09-20 was OOM-killed at exactly this point: RSS went
+    # ~260MB -> ~700-800MB on the snapshot read, and the index build on top
+    # never finished ("clv_index_built" was never logged). What grew was the
+    # snapshot DENSITY for the markets being looked up -- the Kalshi liquid tier
+    # reached ~1,800 markets at a 5-minute cadence -- while the read still took
+    # every snapshot of every market any model had recently forecast, in one
+    # frame. A forecast's drift reads only ITS OWN market's snapshots
+    # (`_mid_at` is keyed by condition_id), so scoring market-chunk by
+    # market-chunk gives exactly the same drifts, and a plain mean recombines
+    # exactly from (sum, n) -- while peak memory follows the chunk, not the
+    # archive. `read_range` pushes the condition_id filter into the parquet
+    # scan, so each chunk reads only its own rows.
+    from lab.eval.clv import chunked_clv_rows
+
+    clv_rows, clv_dropped_for_gap = chunked_clv_rows(
+        forecasts_by_model, model_ids, store, sorted(all_clv_dates), clv_horizons,
+        gap_windows=clv_gap_windows)
     _phase("clv_snapshots_read")
-    # Build the lookup index ONCE for the shared frame. Passing only the frame
-    # still had every model rebuild it -- a full sort + group_by + per-market
-    # list materialisation each time -- which measured as 10.5 minutes of a
-    # 12-minute render and drove its 290MB-815MB memory sawtooth.
-    clv_mid_index = build_mid_index(clv_snapshots)
-    del clv_snapshots  # the index is what the loop reads; drop the frame
     _phase("clv_index_built")
-    for model_id in model_ids:
-        clv_stats = clv_drift(forecasts_by_model[model_id], store, clv_horizons,
-                              gap_windows=clv_gap_windows, mid_index=clv_mid_index)
-        for horizon, stats in clv_stats.items():
-            clv_dropped_for_gap += stats.get("dropped_for_gap", 0)
-            if stats["n"]:
-                clv_rows.append({"model_id": model_id, "horizon": horizon,
-                                 "n": stats["n"], "drift": stats["mean_signed_drift"]})
 
     _phase("clv")
     from lab.eval.wealth_plots import (

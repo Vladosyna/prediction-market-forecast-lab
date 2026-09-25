@@ -405,3 +405,41 @@ def test_mid_index_never_imputes_a_null_mid():
     index = build_mid_index(df)
     target = datetime(2026, 3, 1, tzinfo=timezone.utc)
     assert _mid_at(index, "0xN", target, tolerance_hours=3.0) is None
+
+
+def test_chunked_clv_equals_a_single_pass_exactly(tmp_path):
+    """2026-09-25: the report's single all-markets CLV read OOM-killed every
+    render from 09-20. Chunking by market must change memory, not numbers --
+    a forecast's drift reads only its own market's snapshots, and a mean
+    recombines exactly from (sum, n)."""
+    from lab.eval.clv import chunked_clv_rows
+
+    store = SnapshotStore(tmp_path / "snapshots")
+    t0 = datetime(2026, 7, 1, 0, 0, tzinfo=timezone.utc)
+    forecasts_by_model = {"m1": [], "m2": []}
+    for i in range(7):
+        cid = f"0x{i}"
+        _seed_mid(store, t0 + timedelta(hours=24), cid, 0.40 + 0.05 * i)
+        _seed_mid(store, t0 + timedelta(hours=72), cid, 0.35 + 0.04 * i)
+        for mid, p in (("m1", 0.62 - 0.03 * i), ("m2", 0.38 + 0.02 * i)):
+            forecasts_by_model[mid].append({
+                "ts": t0.isoformat(timespec="seconds"), "condition_id": cid,
+                "model_id": mid, "p_yes": p, "p_market_at_ts": 0.5})
+
+    dates = sorted(clv_dates([f for fs in forecasts_by_model.values() for f in fs], [24, 72]))
+    one_pass, d1 = chunked_clv_rows(forecasts_by_model, ["m1", "m2"], store, dates, [24, 72],
+                                    markets_per_chunk=10_000)
+    tiny, d2 = chunked_clv_rows(forecasts_by_model, ["m1", "m2"], store, dates, [24, 72],
+                                markets_per_chunk=2)
+    assert [(r["model_id"], r["horizon"], r["n"]) for r in one_pass] == \
+           [(r["model_id"], r["horizon"], r["n"]) for r in tiny]
+    for a, b in zip(one_pass, tiny):
+        assert a["drift"] == pytest.approx(b["drift"], abs=1e-12)
+    assert d1 == d2
+
+    # and both agree with the pre-chunking per-model computation
+    for mid in ("m1", "m2"):
+        direct = clv_drift(forecasts_by_model[mid], store, [24, 72])
+        for r in (x for x in one_pass if x["model_id"] == mid):
+            assert r["n"] == direct[r["horizon"]]["n"]
+            assert r["drift"] == pytest.approx(direct[r["horizon"]]["mean_signed_drift"], abs=1e-12)

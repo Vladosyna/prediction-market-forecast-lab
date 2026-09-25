@@ -196,6 +196,55 @@ def clv_drift(forecasts: list[dict], store: SnapshotStore, horizons_hours: list[
     return out
 
 
+def chunked_clv_rows(forecasts_by_model: dict[str, list[dict]], model_ids: list[str],
+                     store: SnapshotStore, dates: list[str], horizons_hours: list[int],
+                     gap_windows: list[tuple[datetime, datetime]] | None = None,
+                     markets_per_chunk: int = 500) -> tuple[list[dict], int]:
+    """Per-(model, horizon) mean signed drift, scored market-chunk by market-chunk.
+
+    Exactly the numbers a single all-markets pass gives -- a forecast's drift
+    reads only its OWN market's snapshots (`_mid_at` is keyed by
+    condition_id), and a mean recombines exactly from (sum, n) -- with peak
+    memory set by the chunk instead of by the archive (2026-09-25). The single
+    pass read every snapshot of every market any model had recently forecast
+    into one frame and then built an index on top; once the Kalshi liquid tier
+    reached ~1,800 markets at a 5-minute cadence that read alone took the
+    report child from ~260MB to ~800MB, the index build never finished, and
+    every render from 2026-09-20 was OOM-killed at that exact phase.
+
+    Returns (rows in model_ids x horizons_hours order, total dropped_for_gap).
+    """
+    all_cids = sorted({f["condition_id"] for fs in forecasts_by_model.values() for f in fs})
+    totals: dict[tuple[str, int], list[float]] = {}
+    dropped = 0
+    for start in range(0, len(all_cids), max(1, markets_per_chunk)):
+        chunk = set(all_cids[start:start + markets_per_chunk])
+        frame = store.read_range(dates, columns=CLV_SNAPSHOT_COLUMNS, condition_ids=chunk)
+        index = build_mid_index(frame)
+        del frame
+        for model_id in model_ids:
+            in_chunk = [f for f in forecasts_by_model.get(model_id, [])
+                        if f["condition_id"] in chunk]
+            if not in_chunk:
+                continue
+            for horizon, stats in clv_drift(in_chunk, store, horizons_hours,
+                                            gap_windows=gap_windows, mid_index=index).items():
+                dropped += stats.get("dropped_for_gap", 0)
+                if stats["n"]:
+                    acc = totals.setdefault((model_id, horizon), [0.0, 0])
+                    acc[0] += stats["mean_signed_drift"] * stats["n"]
+                    acc[1] += stats["n"]
+        del index
+    rows = []
+    for model_id in model_ids:
+        for horizon in horizons_hours:
+            total = totals.get((model_id, horizon))
+            if total and total[1]:
+                rows.append({"model_id": model_id, "horizon": horizon,
+                             "n": int(total[1]), "drift": total[0] / total[1]})
+    return rows, dropped
+
+
 def clv_validity_check(conn, config: dict[str, Any], store: SnapshotStore) -> dict[str, Any]:
     """Phase 17 item 4: is the CLV signal itself trustworthy?
 
