@@ -2142,57 +2142,50 @@ confirmed:
   external_id: KXHURCAT-26EDOUARD-T1
   external_question: Will Edouard become a Category 1 hurricane?
   confirmed_ts: '2026-09-14T14:09:21+00:00'
-proposed:
 - condition_id: '0xb5fc3b7840bdb5c4f83e9d2fe63b09added72e53558a97aec8891f657d465614'
   question: Will Trey Yesavage win the 2026 AL Rookie of the Year award?
   venue: kalshi
   external_id: KXMLBALROTY-26-TYES
   external_question: Will Trey Yesavage win AL ROTY?
-  rationale: 'Both markets resolve on the same specific event: whether Trey Yesavage
-    wins the 2026 American League Rookie of the Year award. Polymarket''s question
-    and resolution criteria explicitly name this, and Kalshi''s ticker suffix (TYES)
-    and outcome labels (''Trey Yesavage'') confirm the market resolves on Yesavage
-    specifically, despite the broad title. Resolution sources (MLB official / credible
-    reporting) are compatible. Minor differences in edge-case handling (e.g., cancellation
-    timing, tie-break rules) are typical boilerplate and do not create a substantive
-    mismatch.'
-  confidence: 0.97
-  proposed_ts: '2026-09-16T16:16:05+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-20T15:27:27+00:00'
 - condition_id: '0x52856d2f2383278ee1cd74867cc8ec948a9cd2fb84bfd04cd9fb85f1e4d71d27'
   question: Will Corey Seager win the 2026 American League MVP Award?
   venue: kalshi
   external_id: KXMLBALMVP-26-CSEA
   external_question: Will Corey Seager win AL MVP?
-  rationale: 'Both markets resolve on the same specific outcome: Corey Seager winning
-    the 2026 American League MVP award. Polymarket''s question and criteria specify
-    the 2026 AL MVP winner (with a named-player leg), and the Kalshi market (KXMLBALMVP-26-CSEA)
-    explicitly resolves Yes iff Corey Seager wins the 2026 AL MVP. The resolution
-    sources and timeframes are consistent (2026 MLB season, official MLB determination),
-    and no material divergence in criteria exists. High confidence in identity.'
-  confidence: 0.95
-  proposed_ts: '2026-09-18T15:11:21+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-20T15:27:32+00:00'
 - condition_id: '0x8024d164af23e51dbbe9792764b12437fe855ad98ecb71d4bed8e252ff1b4309'
   question: Will Mookie Betts win the 2026 National League MVP Award?
   venue: kalshi
   external_id: KXMLBNLMVP-26-MBET
   external_question: Will Mookie Betts win NL MVP?
-  rationale: 'Both markets resolve on the same specific outcome: Mookie Betts winning
-    the 2026 National League MVP Award. The Kalshi ticker suffix (MBET) and outcome
-    labels identify the Mookie Betts leg, and its resolution criterion matches the
-    Polymarket question. Polymarket''s tie/cancellation provisions only alter edge-case
-    handling, not the core event definition, and the resolution source (official MLB
-    information) is consistent. Minor procedural differences are unlikely to cause
-    divergent resolution.'
-  confidence: 0.95
-  proposed_ts: '2026-09-19T15:11:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-09-20T15:27:35+00:00'
+proposed:
+- condition_id: '0x5b30185cd8393093f1c792c425587ad10b3d595983a23bd3599c82557c34a16d'
+  question: Will Konnor Griffin win the 2026 NL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBNLROTY-26-KGRI
+  external_question: Will Konnor Griffin win NL ROTY?
+  rationale: 'Both markets resolve on the same specific outcome: whether Konnor Griffin
+    wins the 2026 National League Rookie of the Year award. Polymarket''s question
+    is player-specific within the NL ROTY market, and Kalshi''s ticker/outcome labels
+    explicitly identify Konnor Griffin as the binary outcome. Resolution criteria
+    are equivalent (NL ROTY, 2026 season). Edge cases like ties or cancellation are
+    handled similarly enough and unlikely to diverge in a way that breaks identity.'
+  confidence: 0.97
+  proposed_ts: '2026-09-26T21:00:10+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
