@@ -1,0 +1,30 @@
+{
+  "code_version": "81a5e6f2039c",
+  "schema_version": "16",
+  "generated_at": "2026-09-27T11:00:44+00:00",
+  "row_count": 308332,
+  "fields": [
+    "condition_id",
+    "venue",
+    "category",
+    "tier",
+    "model_id",
+    "forecast_ts",
+    "p_yes",
+    "p_market_at_ts",
+    "spread_at_ts",
+    "resolved_ts",
+    "payout_yes",
+    "event_id",
+    "m3_randomized",
+    "m3_random_seed",
+    "depth_covariate",
+    "volume_24h",
+    "trades_24h",
+    "hour_utc",
+    "end_date_iso",
+    "days_to_resolution_at_ts",
+    "venue_resolved_ts"
+  ],
+  "rows_sha256": "fbbde5a2b76d1a5d47c73268657aaa2f5409fa5786c23f26067ff1dbcb88730c"
+}
