@@ -2190,6 +2190,23 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x929caa45b66e4cab42ec9f6c39e21ac817b7c4f0293e008099077ee9d9e428ed'
+  question: Will Carter Jensen win the 2026 AL Rookie of the Year award?
+  venue: kalshi
+  external_id: KXMLBALROTY-26-CJEN
+  external_question: Will Carter Jensen win AL ROTY?
+  rationale: 'Both markets resolve on the same specific outcome: whether Carter Jensen
+    wins the 2026 American League Rookie of the Year award. The Polymarket question
+    names Jensen specifically, and its resolution criteria define the AL ROTY winner
+    (with Jensen as the leg''s subject). Kalshi''s ticker suffix CJEN and outcome
+    labels explicitly resolve to ''Carter Jensen wins AL ROTY.'' Same player, same
+    award, same season (2026). No meaningful discrepancy in resolution criteria.'
+  confidence: 0.95
+  proposed_ts: '2026-09-27T21:00:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
