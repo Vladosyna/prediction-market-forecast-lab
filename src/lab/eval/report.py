@@ -392,15 +392,20 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
             bins_by_model[r["model_id"]] = json.loads(r["calibration_json"])
 
     # Recompute MDE inline from stored paired rows (cheap at current scale),
-    # scoped to each row's own venue/category and keyed by event-cluster.
+    # scoped to each row's own venue/category and keyed by event-cluster --
+    # and to the same scored set as the row it sits beside: the Kalshi
+    # exclusion windows and the stated-end censoring (PAP 9.35) apply here
+    # exactly as in run_eval, or the MDE would describe a different sample.
     from lab.eval.run import resolved_forecast_rows
+    scoreable_at = now_utc_iso()
     for row, r in zip(skill_rows, latest_eval_rows(conn)):
         if row["window"] != "all_time":
             continue
         venue_filter = r["venue"]
         category_filter = None if r["category"] in (None, "ALL") else r["category"]
         pairs = resolved_forecast_rows(
-            conn, row["model_id"], None, venue=venue_filter, category=category_filter
+            conn, row["model_id"], None, venue=venue_filter, category=category_filter,
+            apply_exclusions=True, scoreable_at=scoreable_at,
         )
         if len(pairs) < 2:
             continue

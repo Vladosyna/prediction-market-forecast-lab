@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 import pytest
 
@@ -36,7 +37,7 @@ def _seed(conn, n_markets: int = 6):
         conn.execute(
             """INSERT INTO markets (condition_id, slug, question, category, tier,
                                     active, closed, end_date_iso)
-               VALUES (?, ?, ?, 'politics', 'liquid', 1, 0, '2026-12-31T00:00:00+00:00')""",
+               VALUES (?, ?, ?, 'politics', 'liquid', 1, 0, '2026-06-20T00:00:00+00:00')""",
             (cid, f"market-{i}", f"Question {i}?"),
         )
         outcome = float(i % 2)
@@ -178,7 +179,7 @@ def _seed_multi_venue(conn):
                 db.upsert_market(conn, {
                     "condition_id": cid, "venue": venue, "venue_native_id": cid,
                     "slug": None, "question": f"q{i}?", "category": category,
-                    "description": "d", "end_date_iso": "2026-12-31T00:00:00+00:00",
+                    "description": "d", "end_date_iso": "2026-06-20T00:00:00+00:00",
                     "token_id_yes": None, "token_id_no": None, "neg_risk": 0,
                     "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
                     "tier": "liquid",
@@ -259,16 +260,18 @@ def test_report_renders_wealth_null_control_band_alongside_real_curves(config):
     """Phase 14 acceptance: the null-control band renders alongside real
     model curves."""
     conn = db.connect(config["storage"]["db_path"])
-    ts = now_utc().isoformat(timespec="seconds")
+    # Ended ten days ago: past PAP 9.35's stated-end-plus-seven-days censoring.
+    ts = (now_utc() - timedelta(days=20)).isoformat(timespec="seconds")
+    ended = (now_utc() - timedelta(days=10)).isoformat(timespec="seconds")
     for i, category in enumerate(["politics", "politics", "sports", "sports"]):
         cid = f"0xw{i}"
         conn.execute(
-            "INSERT INTO markets (condition_id, question, category, tier, active, closed) "
-            "VALUES (?, ?, ?, 'liquid', 1, 1)", (cid, f"Q{i}?", category),
+            "INSERT INTO markets (condition_id, question, category, tier, active, closed, "
+            "end_date_iso) VALUES (?, ?, ?, 'liquid', 1, 1, ?)", (cid, f"Q{i}?", category, ended),
         )
         db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m0_market",
                                   "p_yes": 0.6, "p_market_at_ts": 0.5})
-        db.record_resolution(conn, cid, ts, 1.0, False, "gamma")
+        db.record_resolution(conn, cid, ended, 1.0, False, "gamma")
     conn.commit()
     update_wealth_ledger(conn, config)
 
@@ -282,6 +285,11 @@ def test_report_renders_wealth_null_control_band_alongside_real_curves(config):
     conn.close()
 
 
+def _after(ts: str, days: float) -> str:
+    from datetime import datetime
+    return (datetime.fromisoformat(ts) + timedelta(days=days)).isoformat(timespec="seconds")
+
+
 def _seed_bucket_event_for_report(conn, event_id, model_id, ts, category="economics", true_idx=1):
     """One resolved 3-leg negRisk-style bucketed event (Phase 16)."""
     for i, order in enumerate([3.0, 3.5, 4.0]):
@@ -289,7 +297,7 @@ def _seed_bucket_event_for_report(conn, event_id, model_id, ts, category="econom
         db.upsert_market(conn, {
             "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
             "slug": None, "question": f"Will CPI be {order}%?", "category": category,
-            "description": "d", "end_date_iso": "2026-12-31T00:00:00+00:00",
+            "description": "d", "end_date_iso": _after(ts, 10),
             "token_id_yes": None, "token_id_no": None, "neg_risk": 1,
             "active": 0, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
             "tier": "liquid", "event_id": event_id,
@@ -307,7 +315,7 @@ def test_report_renders_distributional_rps_section_only_once_threshold_cleared(c
     config's min_bucketed_events (20) and a real table once it's cleared."""
     conn = db.connect(config["storage"]["db_path"])
     store = SnapshotStore(config["storage"]["snapshots_dir"])
-    ts = now_utc().isoformat(timespec="seconds")
+    ts = (now_utc() - timedelta(days=30)).isoformat(timespec="seconds")
 
     for i in range(19):
         _seed_bucket_event_for_report(conn, f"rpsevt{i}", "m_rps", ts)

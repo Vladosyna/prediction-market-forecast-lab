@@ -57,8 +57,8 @@ def test_fitted_weights_favor_better_model(conn):
     for i in range(120):
         cid = f"0x{i}"
         conn.execute(
-            "INSERT INTO markets (condition_id, category, tier, active, closed) "
-            "VALUES (?, 'politics', 'liquid', 1, 1)", (cid,))
+            "INSERT INTO markets (condition_id, category, tier, active, closed, end_date_iso) "
+            "VALUES (?, 'politics', 'liquid', 1, 1, '2026-06-20T00:00:00+00:00')", (cid,))
         outcome = float(i % 2)
         db.record_resolution(conn, cid, "2026-07-01T00:00:00+00:00", outcome, False, "gamma")
         _add_forecast(conn, cid, "m0_market", 0.5)
@@ -79,8 +79,8 @@ def test_fit_m4_weights_respects_floor_and_ceiling(conn):
     for i in range(120):
         cid = f"0x{i}"
         conn.execute(
-            "INSERT INTO markets (condition_id, category, tier, active, closed) "
-            "VALUES (?, 'politics', 'liquid', 1, 1)", (cid,))
+            "INSERT INTO markets (condition_id, category, tier, active, closed, end_date_iso) "
+            "VALUES (?, 'politics', 'liquid', 1, 1, '2026-06-20T00:00:00+00:00')", (cid,))
         outcome = float(i % 2)
         db.record_resolution(conn, cid, "2026-07-01T00:00:00+00:00", outcome, False, "gamma")
         _add_forecast(conn, cid, "m0_market", 0.5)
@@ -97,8 +97,8 @@ def _seed_resolved_category(conn, n, category="politics"):
     for i in range(n):
         cid = f"0x{i}"
         conn.execute(
-            "INSERT INTO markets (condition_id, category, tier, active, closed) "
-            "VALUES (?, ?, 'liquid', 1, 1)", (cid, category))
+            "INSERT INTO markets (condition_id, category, tier, active, closed, end_date_iso) "
+            "VALUES (?, ?, 'liquid', 1, 1, '2026-06-20T00:00:00+00:00')", (cid, category))
         outcome = float(i % 2)
         db.record_resolution(conn, cid, "2026-07-01T00:00:00+00:00", outcome, False, "gamma")
         _add_forecast(conn, cid, "m0_market", 0.5)

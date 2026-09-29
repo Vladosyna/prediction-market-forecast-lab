@@ -6,6 +6,8 @@ import pytest
 
 from lab.eval.run import ALL_CATEGORIES, run_eval
 from lab.store import db
+from datetime import timedelta
+
 from lab.util import load_config, now_utc
 
 
@@ -22,20 +24,29 @@ def config(tmp_path):
     return cfg
 
 
+def _matured():
+    """A forecast 30 days ago on a market whose stated end date passed 20 days
+    ago: old enough to be scored under PAP 9.35's stated-end censoring, young
+    enough for every trailing window."""
+    now = now_utc()
+    return ((now - timedelta(days=30)).isoformat(timespec="seconds"),
+            (now - timedelta(days=20)).isoformat(timespec="seconds"))
+
+
 def _seed(conn, cid, venue, category, n=1):
+    ts, end = _matured()
     db.upsert_market(conn, {
         "condition_id": cid, "venue": venue, "venue_native_id": cid,
         "slug": None, "question": f"q {cid}", "category": category, "description": "d",
-        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "end_date_iso": end, "token_id_yes": None, "token_id_no": None,
         "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
         "tier": "liquid",
     })
-    ts = now_utc().isoformat(timespec="seconds")
     db.append_forecast(conn, {
         "ts": ts, "condition_id": cid, "model_id": "m0_market",
         "p_yes": 0.6, "p_market_at_ts": 0.5,
     })
-    db.record_resolution(conn, cid, ts, 1.0, False, "gamma")
+    db.record_resolution(conn, cid, end, 1.0, False, "gamma")
 
 
 def test_run_eval_produces_rows_per_venue_and_category(config, monkeypatch):
@@ -73,19 +84,19 @@ def test_run_eval_produces_rows_per_venue_and_category(config, monkeypatch):
 
 
 def _seed_disputed(conn, cid, venue, category, disputed):
+    ts, end = _matured()
     db.upsert_market(conn, {
         "condition_id": cid, "venue": venue, "venue_native_id": cid,
         "slug": None, "question": f"q {cid}", "category": category, "description": "d",
-        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "end_date_iso": end, "token_id_yes": None, "token_id_no": None,
         "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
         "tier": "liquid",
     })
-    ts = now_utc().isoformat(timespec="seconds")
     db.append_forecast(conn, {
         "ts": ts, "condition_id": cid, "model_id": "m0_market",
         "p_yes": 0.6, "p_market_at_ts": 0.5,
     })
-    db.record_resolution(conn, cid, ts, 1.0, disputed, "gamma")
+    db.record_resolution(conn, cid, end, 1.0, disputed, "gamma")
 
 
 def test_include_disputed_adds_a_separate_row_without_touching_the_primary_one(config):
@@ -118,6 +129,11 @@ def test_include_disputed_adds_a_separate_row_without_touching_the_primary_one(c
     conn.close()
 
 
+def _plus_days(ts: str, days: float) -> str:
+    from datetime import datetime
+    return (datetime.fromisoformat(ts) + timedelta(days=days)).isoformat(timespec="seconds")
+
+
 def _seed_bucket_event(conn, event_id, model_id, ts, category="economics", true_idx=1):
     """One resolved 3-leg negRisk-style bucketed event, bucket-orderable via
     each question's numeric value (Phase 16). Legs are also ordinary resolved
@@ -127,7 +143,7 @@ def _seed_bucket_event(conn, event_id, model_id, ts, category="economics", true_
         db.upsert_market(conn, {
             "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
             "slug": None, "question": f"Will CPI be {order}%?", "category": category,
-            "description": "d", "end_date_iso": "2026-12-31T00:00:00Z",
+            "description": "d", "end_date_iso": _plus_days(ts, 10),
             "token_id_yes": None, "token_id_no": None, "neg_risk": 1,
             "active": 0, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
             "tier": "liquid", "event_id": event_id,
@@ -145,7 +161,7 @@ def test_eval_runs_rps_columns_populate_only_with_enough_bucketed_events(config)
     config's min_bucketed_events (20), and populate once that many bucketed
     events exist for that model/venue/category/window."""
     conn = db.connect(config["storage"]["db_path"])
-    ts = now_utc().isoformat(timespec="seconds")
+    ts, _ = _matured()
     for i in range(19):
         _seed_bucket_event(conn, f"evt{i}", "m0_market", ts)
     conn.commit()
@@ -243,7 +259,7 @@ def _seed_at(conn, cid, venue, forecast_ts):
     db.upsert_market(conn, {
         "condition_id": cid, "venue": venue, "venue_native_id": cid,
         "slug": None, "question": f"q {cid}", "category": "economics", "description": "d",
-        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "end_date_iso": _plus_days(forecast_ts, 1), "token_id_yes": None, "token_id_no": None,
         "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
         "tier": "liquid",
     })
@@ -319,14 +335,14 @@ def test_confirmatory_carries_both_definitions_and_other_windows_only_the_primar
     db.upsert_market(conn, {
         "condition_id": "poly:h", "venue": "polymarket", "venue_native_id": "poly:h",
         "slug": None, "question": "q", "category": "politics", "description": "d",
-        "end_date_iso": "2026-12-31T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+        "end_date_iso": "2026-09-10T02:00:00Z", "token_id_yes": None, "token_id_no": None,
         "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
         "tier": "liquid",
     })
-    db.append_forecast(conn, {"ts": "2026-09-10T02:00:00+00:00", "condition_id": "poly:h",
+    db.append_forecast(conn, {"ts": "2026-08-01T02:00:00+00:00", "condition_id": "poly:h",
                               "model_id": "m0_market", "p_yes": 0.6, "p_market_at_ts": 0.5,
                               "days_to_resolution_at_ts": 40.0})
-    db.record_resolution(conn, "poly:h", "2026-09-12T00:00:00+00:00", 1.0, False, "gamma")
+    db.record_resolution(conn, "poly:h", "2026-08-03T00:00:00+00:00", 1.0, False, "gamma")
     conn.commit()
     run_eval(conn, config)
     labels = {r["window_label"] for r in conn.execute(
@@ -348,13 +364,13 @@ def test_the_m1_refit_learns_on_the_horizon_it_is_applied_on(config):
     db.upsert_market(conn, {
         "condition_id": "poly:r", "venue": "polymarket", "venue_native_id": "poly:r",
         "slug": None, "question": "q", "category": "politics", "description": "d",
-        "end_date_iso": "2026-11-08T02:00:00+00:00", "token_id_yes": None, "token_id_no": None,
+        "end_date_iso": "2026-09-07T02:00:00+00:00", "token_id_yes": None, "token_id_no": None,
         "neg_risk": 0, "active": 1, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
         "tier": "liquid",
     })
-    db.append_forecast(conn, {"ts": "2026-09-09T02:00:00+00:00", "condition_id": "poly:r",
+    db.append_forecast(conn, {"ts": "2026-07-09T02:00:00+00:00", "condition_id": "poly:r",
                               "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5})
-    db.record_resolution(conn, "poly:r", "2026-09-14T02:00:00+00:00", 1.0, False, "gamma")
+    db.record_resolution(conn, "poly:r", "2026-07-14T02:00:00+00:00", 1.0, False, "gamma")
     conn.commit()
     (row,) = m1_resolved_rows(conn)
     assert row["days_to_resolution"] == pytest.approx(60.0, abs=0.01), "stated, not the 5 realized"
@@ -363,7 +379,7 @@ def test_the_m1_refit_learns_on_the_horizon_it_is_applied_on(config):
 
 # --- pre-registered robustness checks as code (2026-09-25) -------------------
 
-def _mk(conn, cid, venue="polymarket", end="2026-12-31T00:00:00+00:00", neg_risk=0):
+def _mk(conn, cid, venue="polymarket", end="2026-09-15T00:00:00+00:00", neg_risk=0):
     db.upsert_market(conn, {
         "condition_id": cid, "venue": venue, "venue_native_id": cid,
         "slug": None, "question": f"q {cid}", "category": "politics", "description": "d",
@@ -462,3 +478,130 @@ def test_the_confidence_sequence_does_not_depend_on_row_order():
         np.testing.assert_allclose(got, base)
         cs = confidence_sequence(got)
         assert (cs.lo, cs.hi) == pytest.approx((ref.lo, ref.hi))
+
+
+# --- stated-end censoring (2026-09-28, PAP 9.35) ------------------------------
+
+def _mk_resolved(conn, cid, forecast_ts, resolved_ts, payout, end=None, frozen_days=None):
+    db.upsert_market(conn, {
+        "condition_id": cid, "venue": "polymarket", "venue_native_id": cid,
+        "slug": None, "question": f"q {cid}", "category": "politics", "description": "d",
+        "end_date_iso": end, "token_id_yes": None, "token_id_no": None,
+        "neg_risk": 0, "active": 0, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
+        "tier": "liquid",
+    })
+    db.append_forecast(conn, {"ts": forecast_ts, "condition_id": cid, "model_id": "m0_market",
+                              "p_yes": 0.6, "p_market_at_ts": 0.5,
+                              "days_to_resolution_at_ts": frozen_days})
+    db.record_resolution(conn, cid, resolved_ts, payout, False, "gamma")
+
+
+def _ago(days: float) -> str:
+    return (now_utc() - timedelta(days=days)).isoformat(timespec="seconds")
+
+
+def test_an_early_resolution_waits_for_its_stated_date(config):
+    """A "by date" market resolves early exactly when the event happens, so a
+    market still inside its stated window is in "everything resolved by
+    tonight" only if it went YES. It must not be scored until its stated end
+    date is SCORING_LAG_DAYS past -- by then its NO siblings are in too."""
+    from lab.eval.run import SCORING_LAG_DAYS, resolved_forecast_rows
+
+    conn = db.connect(config["storage"]["db_path"])
+    # stated 100 days out, resolved YES five days after the forecast
+    _mk_resolved(conn, "early_yes", _ago(20), _ago(15), 1.0, frozen_days=100.0)
+    # stated end 20 days ago, resolved NO on it
+    _mk_resolved(conn, "on_time_no", _ago(40), _ago(20), 0.0, end=_ago(20))
+    # the lag boundary itself, both sides
+    _mk_resolved(conn, "lag_short", _ago(30), _ago(SCORING_LAG_DAYS - 1), 0.0,
+                 end=_ago(SCORING_LAG_DAYS - 1))
+    _mk_resolved(conn, "lag_ok", _ago(30), _ago(SCORING_LAG_DAYS + 1), 0.0,
+                 end=_ago(SCORING_LAG_DAYS + 1))
+    conn.commit()
+
+    now = now_utc().isoformat(timespec="seconds")
+    censored = {r["condition_id"] for r in resolved_forecast_rows(
+        conn, "m0_market", None, scoreable_at=now)}
+    assert censored == {"on_time_no", "lag_ok"}
+    everything = {r["condition_id"] for r in resolved_forecast_rows(conn, "m0_market", None)}
+    assert everything == {"early_yes", "on_time_no", "lag_short", "lag_ok"}, (
+        "the uncensored read -- the paper export's -- must stay complete")
+    conn.close()
+
+
+def test_the_frozen_horizon_decides_and_no_stated_end_means_no_entry(config):
+    """The stated end is ts + days_to_resolution_at_ts where the row froze it,
+    the market's end date otherwise; a row with neither cannot be censored and
+    its resolution time is outcome-driven, so it does not enter."""
+    from lab.eval.run import resolved_forecast_rows
+
+    conn = db.connect(config["storage"]["db_path"])
+    # the market's end date says long past, the frozen value says still open
+    _mk_resolved(conn, "frozen_open", _ago(10), _ago(9), 1.0, end=_ago(60), frozen_days=90.0)
+    _mk_resolved(conn, "no_end", _ago(40), _ago(30), 1.0)
+    conn.commit()
+    got = resolved_forecast_rows(conn, "m0_market", None,
+                                 scoreable_at=now_utc().isoformat(timespec="seconds"))
+    assert got == []
+    conn.close()
+
+
+def test_entry_time_is_the_later_of_resolution_and_stated_end_plus_lag(config):
+    """The CS consumes clusters in entry order, so each night's sequence
+    extends the last one rather than inserting observations into its past."""
+    from datetime import datetime
+
+    from lab.eval.run import SCORING_LAG_DAYS, resolved_forecast_rows
+
+    conn = db.connect(config["storage"]["db_path"])
+    # resolved on its end date: enters at end + lag
+    _mk_resolved(conn, "prompt", "2026-07-01T02:00:00+00:00", "2026-07-20T00:00:00+00:00",
+                 0.0, end="2026-07-20T00:00:00+00:00")
+    # recorded long after the end date: enters when recorded
+    _mk_resolved(conn, "late", "2026-07-01T02:00:00+00:00", "2026-08-30T00:00:00+00:00",
+                 0.0, end="2026-07-20T00:00:00+00:00")
+    conn.commit()
+    rows = {r["condition_id"]: r for r in resolved_forecast_rows(
+        conn, "m0_market", None, scoreable_at=now_utc().isoformat(timespec="seconds"))}
+    expected = datetime(2026, 7, 20) + timedelta(days=SCORING_LAG_DAYS)
+    assert rows["prompt"]["entry_ts"] == expected.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    assert rows["late"]["entry_ts"] == "2026-08-30T00:00:00+00:00"
+    conn.close()
+
+
+def test_the_uncensored_sensitivity_is_a_named_check_beside_the_primary(config):
+    """The rule every row was scored under until 2026-09-28 is kept, under its
+    own label, so the effect of the change is reportable."""
+    from lab.eval.run import run_robustness_checks
+
+    conn = db.connect(config["storage"]["db_path"])
+    _mk_resolved(conn, "early_yes", _ago(20), _ago(15), 1.0, frozen_days=100.0)
+    _mk_resolved(conn, "on_time_no", _ago(40), _ago(20), 0.0, end=_ago(20))
+    conn.commit()
+    run_eval(conn, config)
+    run_robustness_checks(conn, config, names=["uncensored"])
+
+    def n(label):
+        row = conn.execute(
+            "SELECT n FROM eval_runs WHERE model_id='m0_market' AND venue='polymarket' "
+            "AND category=? AND window_label=? ORDER BY id DESC LIMIT 1",
+            (ALL_CATEGORIES, label)).fetchone()
+        return row["n"] if row else 0
+
+    assert n("all_time") == 1
+    assert n("all_time_uncensored") == 2
+    conn.close()
+
+
+def test_the_learning_loop_reads_the_same_censored_sample(config):
+    """Promotions and rollbacks are decided on m1_resolved_rows; an
+    early-resolution holdout would favour whichever version predicts YES
+    higher on long-dated markets."""
+    from lab.learn.loop import m1_resolved_rows
+
+    conn = db.connect(config["storage"]["db_path"])
+    _mk_resolved(conn, "early_yes", _ago(20), _ago(15), 1.0, frozen_days=100.0)
+    _mk_resolved(conn, "on_time_no", _ago(40), _ago(20), 0.0, end=_ago(20))
+    conn.commit()
+    assert [r["condition_id"] for r in m1_resolved_rows(conn)] == ["on_time_no"]
+    conn.close()

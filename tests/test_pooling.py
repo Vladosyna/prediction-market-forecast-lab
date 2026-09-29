@@ -195,7 +195,8 @@ def test_estimate_rho_bar_m7_returns_none_without_confirmed_pairs(config, tmp_pa
 # --- learn/loop.py wiring: fit_m4_extremization / fit_m7_extremization -----
 
 def _seed_resolved(conn, model_id, n, category="politics"):
-    ts = now_utc().isoformat(timespec="seconds")
+    # Ended and resolved ten days ago: past PAP 9.35's stated-end censoring.
+    ts = (now_utc() - timedelta(days=10)).isoformat(timespec="seconds")
     rng = np.random.default_rng(11)
     true_logit = rng.uniform(-2, 2, size=n)
     y = rng.binomial(1, sigmoid(true_logit))
@@ -203,9 +204,10 @@ def _seed_resolved(conn, model_id, n, category="politics"):
     for i in range(n):
         cid = f"{model_id}-{category}-{i}"
         conn.execute(
-            """INSERT OR IGNORE INTO markets (condition_id, question, category, tier, active, closed)
-               VALUES (?, ?, ?, 'liquid', 1, 1)""",
-            (cid, f"Q {cid}?", category),
+            """INSERT OR IGNORE INTO markets (condition_id, question, category, tier, active, closed,
+                                               end_date_iso)
+               VALUES (?, ?, ?, 'liquid', 1, 1, ?)""",
+            (cid, f"Q {cid}?", category, ts),
         )
         db.append_forecast(conn, {
             "ts": ts, "condition_id": cid, "model_id": model_id,

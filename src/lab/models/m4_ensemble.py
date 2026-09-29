@@ -50,6 +50,11 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
 
     artifact: dict[str, Any] = {"kind": "m4_weights", "fitted_at": now_utc_iso(),
                                 "categories": {}}
+    # Censored at the stated end date like every resolved-row reader (PAP
+    # 9.35): weights fit on an early-resolution sample favour whichever member
+    # predicts YES higher on long-dated markets.
+    from lab.eval.run import SCOREABLE_SQL
+
     rows = conn.execute(
         """
         SELECT m.category, f.model_id, AVG((f.p_yes - r.payout_yes)*(f.p_yes - r.payout_yes)) AS brier,
@@ -57,10 +62,10 @@ def fit_m4_weights(conn, config: dict[str, Any]) -> dict[str, Any]:
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id IN ({})
+        WHERE f.model_id IN ({}) AND {}
         GROUP BY m.category, f.model_id
-        """.format(",".join("?" for _ in POOLABLE)),
-        POOLABLE,
+        """.format(",".join("?" for _ in POOLABLE), SCOREABLE_SQL),
+        (*POOLABLE, now_utc_iso()),
     ).fetchall()
     by_cat: dict[str, dict[str, dict]] = {}
     for r in rows:

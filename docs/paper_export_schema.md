@@ -123,6 +123,15 @@ lab's own numbers, apply exactly these rules (they live in code as
 - **Disputed resolutions** are already absent from the primary export (the
   query applies `disputed = 0`); the lab's `_disputed_inclusive` robustness
   rows are computed separately.
+- **Stated-end censoring** (PAP 9.35, `lab.eval.run.SCORING_LAG_DAYS`): a row
+  is scored only once its stated end date plus 7 days is on or before your
+  analysis date. The stated end date is `forecast_ts + days_to_resolution_at_ts`
+  where that field is set, else `end_date_iso`; rows with neither are not
+  scored. Without this, markets still inside their stated window appear only
+  if they resolved early — which for "by date" markets means YES. The lab
+  orders its confidence sequence by entry time, the later of the recorded
+  resolution and stated end + 7 days.
 
-These rules were enforced in the lab's own evaluation from 2026-09-25; eval
-rows written before that date do not apply them.
+The first three rules were enforced in the lab's own evaluation from
+2026-09-25, the censoring from 2026-09-28; eval rows written before those
+dates do not apply them.

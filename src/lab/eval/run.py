@@ -47,6 +47,30 @@ KALSHI_EXCLUSION_WINDOWS = (
     ("2026-09-02", "2026-09-07"),   # PAP 9.26
     ("2026-09-18", "2026-09-25"),   # PAP 9.30 -- rate budget, lock storm, OOM loop
 )
+# PAP 9.35 (2026-09-28): a forecast enters any statistic only once its
+# market's STATED end date is this many days in the past. Scoring "whatever
+# has resolved by tonight" conditions on the outcome: a "by date" market
+# resolves early precisely when the event happens, so a market still inside
+# its stated window is in the scored set only if it went YES. Measured on
+# Polymarket's confirmatory sample, H1's >=30-day stratum held 45 such clusters
+# (79% YES, price minus outcome -0.196) beside 153 whose date had passed (42%
+# YES, +0.046), and the >90-day stratum consisted of nothing else. Seven days
+# because the watcher has recorded ~97% of outcomes by then, and its lag is
+# the same for YES and NO (p50 1.3 days both), so what is still missing at
+# that point is not selected on the outcome.
+SCORING_LAG_DAYS = 7
+# The stated end date as a Julian day: frozen at forecast time where the row
+# carries it (from 2026-09-25), else the market's recorded end date -- the same
+# proxy the stated horizon strata use (PAP 9.31). Aliases f/m as everywhere.
+STATED_END_JD = ("COALESCE(julianday(f.ts) + f.days_to_resolution_at_ts, "
+                 "julianday(m.end_date_iso))")
+SCOREABLE_SQL = f"{STATED_END_JD} <= julianday(?) - {SCORING_LAG_DAYS}"
+# When a row became part of the scored set: its stated end plus the lag, or
+# its recorded resolution if that came later. The confidence sequence consumes
+# clusters in this order, so each night's sequence extends the previous one
+# instead of inserting observations into its past.
+ENTRY_JD_SQL = f"MAX(julianday(r.resolved_ts), {STATED_END_JD} + {SCORING_LAG_DAYS})"
+ENTRY_TS_SQL = f"strftime('%Y-%m-%dT%H:%M:%S+00:00', {ENTRY_JD_SQL})"
 # (label, trailing days, since timestamp). "confirmatory" is the pre-registered
 # sample, not a chosen window, so CLAUDE.md §7's "no cherry-picked windows"
 # rule is what requires it rather than what forbids it.
@@ -80,7 +104,7 @@ def resolved_forecast_rows(
     venue: str | None = None, category: str | None = None,
     null_control_ids: set[str] | None = None, invert_null_control: bool = False,
     include_disputed: bool = False, since_ts: str | None = None,
-    apply_exclusions: bool = False,
+    apply_exclusions: bool = False, scoreable_at: str | None = None,
 ) -> list[dict]:
     """Paired rows: forecast + resolution outcome + venue/category/event_id
     for one model, optionally scoped to one venue and/or one category.
@@ -90,8 +114,14 @@ def resolved_forecast_rows(
     result exactly. include_disputed=True drops that filter, giving PAP
     Addendum 9.2(b)'s promised robustness check something to actually
     compare against (previously nothing did: disputed markets were excluded
-    everywhere with no inclusive path to re-run instead)."""
-    query = """
+    everywhere with no inclusive path to re-run instead).
+
+    scoreable_at (PAP 9.35) keeps only rows whose stated end date is
+    SCORING_LAG_DAYS before it, and fills `entry_ts`. Off by default for the
+    same reason as `apply_exclusions`: the paper export is the complete record
+    and carries every field a replicator needs to apply the rule."""
+    entry = ENTRY_TS_SQL if scoreable_at is not None else "NULL"
+    query = f"""
         SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts,
                r.payout_yes, r.resolved_ts, r.venue_resolved_ts AS venue_resolved_ts,
                f.ts AS forecast_ts, f.m3_randomized AS m3_randomized,
@@ -100,7 +130,8 @@ def resolved_forecast_rows(
                f.trades_24h AS trades_24h, f.hour_utc AS hour_utc,
                m.venue AS venue, m.category AS category, m.event_id AS event_id,
                m.tier AS tier, m.end_date_iso AS end_date_iso, m.neg_risk AS neg_risk,
-               f.days_to_resolution_at_ts AS days_to_resolution_at_ts
+               f.days_to_resolution_at_ts AS days_to_resolution_at_ts,
+               {entry} AS entry_ts
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id
         JOIN markets m ON m.condition_id = f.condition_id
@@ -109,6 +140,13 @@ def resolved_forecast_rows(
     if not include_disputed:
         query += " AND r.disputed = 0"
     params: list[Any] = [model_id]
+    if scoreable_at is not None:
+        # A row with no stated end date at all cannot be censored this way,
+        # and its resolution time is outcome-driven by construction (an
+        # open-ended market resolves when the event happens): it does not
+        # enter. 21 of 13,450 confirmatory Polymarket rows on 2026-09-28.
+        query += f" AND {SCOREABLE_SQL}"
+        params.append(scoreable_at)
     if venue is not None:
         query += " AND m.venue = ?"
         params.append(venue)
@@ -154,7 +192,9 @@ def _per_cluster_diffs_in_resolution_order(
     """One mean diff per event-cluster, ordered by each cluster's earliest
     resolution -- what the anytime-valid CS treats as its sequential sample
     (brief section 7: "n counts resolved event clusters, not venue-market
-    rows")."""
+    rows"). From 2026-09-28 the caller passes each row's entry time into the
+    scored set instead (PAP 9.35), which equals its resolution time whenever
+    the outcome was recorded after the stated end date plus the lag."""
     # Deterministic order (2026-09-25, PAP 9.32): resolution time, then cluster
     # id. The previous `np.argsort(resolved_ts)` used quicksort -- unstable --
     # over rows the query returns in no defined order, so clusters resolving
@@ -195,8 +235,10 @@ def evaluate_model(
     bins = calibration_bins(p_model, y, n_bins=config["eval"]["calibration_bins"])
 
     diffs = brier(p_market, y) - brier(p_model, y)
-    resolved_ts = [r["resolved_ts"] for r in rows]
-    per_cluster_diffs = _per_cluster_diffs_in_resolution_order(diffs, cluster_ids, resolved_ts)
+    # Entry order where the rows were censored (PAP 9.35), resolution order
+    # for the uncensored sensitivity run -- which is exactly what it was.
+    order_ts = [r.get("entry_ts") or r["resolved_ts"] for r in rows]
+    per_cluster_diffs = _per_cluster_diffs_in_resolution_order(diffs, cluster_ids, order_ts)
     cs = confidence_sequence(
         per_cluster_diffs, alpha=config["eval"]["confidence_sequence"]["alpha"]
     )
@@ -317,6 +359,7 @@ def _realized_horizon_bucket(row: dict) -> str | None:
 def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
              row_filter: Callable[[list[dict]], list[dict]] | None = None,
              suffix: str = "", models: frozenset[str] | set[str] | None = None,
+             censor: bool = True,
              ) -> list[dict[str, Any]]:
     """include_disputed=False (default) is the unchanged nightly path.
     include_disputed=True is PAP Addendum 9.2(b)'s robustness re-run: same
@@ -332,6 +375,9 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
     # under its own parallel window_label, never overwriting a primary row.
     label_suffix = ("_disputed_inclusive" if include_disputed else "") + suffix
     keep = row_filter or (lambda rows: rows)
+    # One cutoff for the whole run (PAP 9.35), so every row of the matrix is
+    # censored at the same instant; `censor=False` is the named sensitivity.
+    scoreable_at = now_utc_iso() if censor else None
 
     nc_ids_by_venue = null_control_ids_by_venue(conn, config)
     model_ids = [r["model_id"] for r in conn.execute(
@@ -362,7 +408,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                     rows = resolved_forecast_rows(
                         conn, model_id, days, venue=venue, category=category,
                         null_control_ids=nc_ids, include_disputed=include_disputed,
-                        since_ts=since, apply_exclusions=True,
+                        since_ts=since, apply_exclusions=True, scoreable_at=scoreable_at,
                     )
                     rows = keep(rows)
                     summary = evaluate_model(
@@ -378,6 +424,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                 rows = resolved_forecast_rows(
                     conn, model_id, days, venue=venue, null_control_ids=nc_ids,
                     include_disputed=include_disputed, since_ts=since, apply_exclusions=True,
+                    scoreable_at=scoreable_at,
                 )
                 rows = keep(rows)
                 summary = evaluate_model(
@@ -428,7 +475,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
             nc_rows = resolved_forecast_rows(
                 conn, model_id, None, venue=venue, null_control_ids=nc_ids,
                 invert_null_control=True, include_disputed=include_disputed,
-                apply_exclusions=True,
+                apply_exclusions=True, scoreable_at=scoreable_at,
             )
             nc_rows = keep(nc_rows)
             nc_summary = evaluate_model(
@@ -504,6 +551,9 @@ ROBUSTNESS_CHECKS: dict[str, dict[str, Any]] = {
                 "filter": lambda rows: [r for r in rows if r.get("neg_risk")]},
     "non_negrisk": {"pap": "9.3(a)", "suffix": "_non_negrisk", "models": M1_FAMILY,
                     "filter": lambda rows: [r for r in rows if not r.get("neg_risk")]},
+    # 9.35: everything resolved by tonight, early resolutions included -- the
+    # rule every row was scored under until 2026-09-28, kept as a sensitivity.
+    "uncensored": {"pap": "9.35", "suffix": "_uncensored", "censor": False},
 }
 
 
@@ -522,7 +572,7 @@ def run_robustness_checks(conn, config: dict[str, Any],
         summaries = run_eval(conn, config,
                              include_disputed=spec.get("include_disputed", False),
                              row_filter=spec.get("filter"), suffix=spec.get("suffix", ""),
-                             models=spec.get("models"))
+                             models=spec.get("models"), censor=spec.get("censor", True))
         out[name] = len(summaries)
         log.info("robustness check complete",
                  extra={"ctx": {"check": name, "pap": spec["pap"], "summaries": len(summaries)}})

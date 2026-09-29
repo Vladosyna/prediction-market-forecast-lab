@@ -1423,3 +1423,77 @@ skill: with outcomes independent of both forecasts, the expected paired differen
 two forecasts' marginal distributions and is not zero in general — a recalibration model that
 extremizes would be expected to lose, not tie. A larger known-zero sample is the honest way to add
 power to a placebo, so that is what is done.
+
+**Addendum 9.35 (2026-09-28).** A forecast enters any statistic only once its market's stated end
+date is seven days past. This changes which resolved forecasts every statistic is computed on, H1's
+primary one included, so the reasons are given in full, and the previous rule is kept as a named
+sensitivity analysis.
+
+**What was still wrong after 9.31.** 9.31 moved H1's strata from the realized horizon to the stated
+one, because a "will X happen by date" market resolves early precisely when X happens. That fixed how
+a stratum is *defined*. It did not fix which forecasts are *in* it: every statistic was computed over
+"everything resolved by tonight", and a market still inside its stated window is resolved by tonight
+only if it went YES — its NO siblings, which resolve on the date, are not in yet. Measured on
+2026-09-28 over Polymarket `m0_market` rows in the confirmatory window (market-side quantities only,
+as in 9.31): the stated ≥30-day stratum held **195 event clusters, 54.8% YES, price minus outcome
+−0.037**; the **50 clusters whose stated date had not yet arrived were 80% YES**, and removing them
+leaves **145 clusters, 41.9% YES, +0.048**. The stated >90-day stratum consisted of nothing but such
+markets (38 clusters, 80% YES, −0.215). Pooled over all Polymarket horizons, 7.3% of resolved rows
+were early resolutions of markets whose date had not come (81% YES). Kalshi carried none: every
+resolved Kalshi market in the sample had passed its stated close.
+
+**The rule.** A forecast is scoreable once its **stated end date plus seven days** has passed. The
+stated end date is the forecast time plus the horizon frozen in the row
+(`forecasts.days_to_resolution_at_ts`, from 2026-09-25), else the market's recorded end date — the
+same proxy 9.31 uses. A row with no stated end date does not enter at all: it cannot be censored, and
+an open-ended market's resolution time is outcome-driven by construction (21 of 13,450 confirmatory
+Polymarket rows). The anytime-valid confidence sequence consumes clusters in **entry order** — the
+later of the recorded resolution and the stated end plus seven days — so each night's sequence
+extends the previous one instead of inserting observations into its past (it previously used
+resolution order, which for early resolutions is itself outcome-dependent).
+
+**Why seven days.** It is set by the recording lag, measured on the same sample: of Polymarket
+markets forecast in the confirmatory window, the share with a recorded outcome was 79.5% 0–3 days
+after the stated date, 97.0% at 3–7 days and 95.7–98.7% thereafter (about 2% never resolve in the
+ledger), and the lag is the same for both outcomes (median 1.3 days for YES and for NO). The YES
+share among recorded outcomes is 51% at 0–3 days — the transient where early YES resolutions are
+all in and on-date NO ones are still arriving — and 38–41% from the first week on. Kalshi records
+faster (median 0.3 days), so seven days costs it only a week of recency.
+
+**Scope.** Every row `lab eval` writes — all windows, the `_hs_`/`_hr_` strata, the null control,
+every robustness check — and the report's MDE, which now also applies the Kalshi exclusion windows it
+had omitted. The learning loop reads the same censored sample: `m1_resolved_rows` (the walk-forward
+holdout promotions and rollbacks are decided on), `m3_`/`m4_`/`m7_resolved_rows`, the M4 weight fit
+and the MWU replay. The wealth ledger admits rows under the rule from this date; rows appended
+before it are left as written, since the table is derived and a rebuild would re-sequence every
+running sum. **Not** applied to the paper export, which stays the complete record and already
+carries `forecast_ts`, `days_to_resolution_at_ts` and `end_date_iso`, so a replicator applies the
+rule at analysis time; nor to descriptive readers (post-mortems, the CLV validity diagnostic, the
+dashboard).
+
+**The sensitivity analysis.** `lab eval --robustness` gains `uncensored`: the full matrix under the
+rule every row was scored under until today, written as `<label>_uncensored`. Both are reported.
+
+**Why this is not outcome-shopping.** As in 9.31, the measurement that motivated the change is the
+*market's* outcome rate and calibration gap in the affected subset, not any model's skill; no model's
+skill under either rule was computed before this addendum was written. The argument is one of
+validity — membership of a scored set must not depend on the outcome being scored — and it would
+stand whatever the result.
+
+**What it does to the confirmatory analysis.** 9.1 keeps forecasts frozen on or before 2026-12-31 in
+the confirmatory set "resolving at any later date". That is unchanged: they remain in the set, and
+each is scored once its stated date is seven days past the date the analysis is run. Forecasts on
+markets stated to end later than that are censored, not dropped for cause, and the paper will report
+how many. At today's sizes H1's stated ≥30-day stratum is **145 event clusters** (the 30–90-day
+bucket) and the >90-day bucket is empty until the first markets stated more than ninety days out
+from 2026-07-06 reach their dates in October. This is the same power problem 9.31 and 9.33 stated —
+it strengthens the commitment to report H1 at the freeze as a bound — and the >90-day bucket's
+earlier clusters were never evidence about long horizons, only about which markets happen early.
+
+**A limitation recorded, not measured.** The historical bootstrap the active M1 curves were fit on
+(`m1_curves` v1) contains the markets resolved by that dataset's end-of-2025 cut, so its long-horizon
+buckets have the same inclusion structure. It has not been measured here and the curves in
+production are unchanged; it is recorded as a limitation of M1's prior for the paper.
+
+**Discontinuity.** `eval_runs` rows from 2026-09-28 apply the rule; earlier rows do not, and the
+`_uncensored` check reproduces them.

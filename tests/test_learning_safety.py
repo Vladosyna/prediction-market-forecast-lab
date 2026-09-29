@@ -200,9 +200,11 @@ def test_registry_rollback_restores_prior(config):
 # --- (d) automatic rollback on degradation --------------------------------
 
 def _seed_m0(conn, n=60):
+    # Resolved ten days ago, so PAP 9.35's stated-end censoring (end date plus
+    # seven days) has let every row into the holdout.
     now = now_utc()
-    ts = (now - timedelta(days=3)).isoformat(timespec="seconds")
-    rts = now.isoformat(timespec="seconds")
+    ts = (now - timedelta(days=13)).isoformat(timespec="seconds")
+    rts = (now - timedelta(days=10)).isoformat(timespec="seconds")
     for i in range(n):
         cid = f"0x{i}"
         # A real market has an end date; this one resolves on it, so the
@@ -251,14 +253,15 @@ def test_mwu_challenger_degraded_auto_rolls_back(config):
     from lab.economy.mwu import _mwu_rollback_check
 
     conn = db.connect(config["storage"]["db_path"])
-    ts = now_utc().isoformat(timespec="seconds")
+    ts = (now_utc() - timedelta(days=13)).isoformat(timespec="seconds")
+    ended = (now_utc() - timedelta(days=10)).isoformat(timespec="seconds")
     for i in range(60):
         cid = f"mwu-{i}"
         conn.execute(
-            "INSERT INTO markets (condition_id, category, tier, active, closed) "
-            "VALUES (?, 'politics', 'liquid', 1, 1)", (cid,))
+            "INSERT INTO markets (condition_id, category, tier, active, closed, end_date_iso) "
+            "VALUES (?, 'politics', 'liquid', 1, 1, ?)", (cid, ended))
         outcome = float(i % 2)
-        db.record_resolution(conn, cid, ts, outcome, False, "gamma")
+        db.record_resolution(conn, cid, ended, outcome, False, "gamma")
         db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m0_market",
                                   "p_yes": 0.5, "p_market_at_ts": 0.5})
         db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m1_debiased",

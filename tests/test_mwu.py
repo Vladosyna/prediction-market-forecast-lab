@@ -185,12 +185,13 @@ def test_mwu_raw_weights_favor_higher_wealth():
 # --- update_mwu_challenger: invisible-until-promoted / promotion / probation
 
 def _seed_m4_pool(conn, n=60, category="politics"):
-    ts = now_utc().isoformat(timespec="seconds")
+    # Forecast, ended and resolved ten days ago: past PAP 9.35's censoring.
+    ts = (now_utc() - timedelta(days=10)).isoformat(timespec="seconds")
     for i in range(n):
         cid = f"pool-{category}-{i}"
         conn.execute(
-            "INSERT INTO markets (condition_id, category, tier, active, closed) "
-            "VALUES (?, ?, 'liquid', 1, 1)", (cid, category),
+            "INSERT INTO markets (condition_id, category, tier, active, closed, end_date_iso) "
+            "VALUES (?, ?, 'liquid', 1, 1, ?)", (cid, category, ts),
         )
         outcome = float(i % 2)
         db.record_resolution(conn, cid, ts, outcome, False, "gamma")

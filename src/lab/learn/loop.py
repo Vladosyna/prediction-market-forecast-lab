@@ -31,6 +31,7 @@ from typing import Any, Callable
 import numpy as np
 
 from lab.eval.anytime import confidence_sequence
+from lab.eval.run import ENTRY_JD_SQL, SCOREABLE_SQL, SCORING_LAG_DAYS
 from lab.eval.scoring import cluster_bootstrap_ci
 from lab.learn import registry
 from lab.learn.refit import (
@@ -199,10 +200,13 @@ def _m4_weights_predict(artifact: dict[str, Any], row: dict[str, Any]) -> float:
 def m1_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     """(condition_id, p_market, outcome, days_to_resolution) from resolved rows.
 
-    Ordered newest-resolved first so a trailing window is a simple head slice.
+    Ordered newest-entered first so a trailing window is a simple head slice,
+    and censored at the stated end date exactly as the evaluation is (PAP
+    9.35): this is the walk-forward holdout promotions and rollbacks are
+    decided on, and an early-resolution sample is enriched for YES.
     """
     rows = [dict(r) for r in conn.execute(
-        """
+        f"""
         SELECT f.condition_id, f.p_market_at_ts AS p_market, r.payout_yes AS outcome,
                r.resolved_ts, m.event_id AS event_id, m.venue AS venue,
                -- STATED horizon at forecast time (PAP 9.31), not realized:
@@ -214,16 +218,17 @@ def m1_resolved_rows(conn, limit: int | None = None) -> list[dict]:
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id = 'm0_market'
-        ORDER BY r.resolved_ts DESC
-        """
+        WHERE f.model_id = 'm0_market' AND {SCOREABLE_SQL}
+        ORDER BY {ENTRY_JD_SQL} DESC
+        """, (now_utc_iso(),)
     )]
     rows = [r for r in rows if r["days_to_resolution"] and r["days_to_resolution"] > 0]
     return rows[:limit] if limit else rows
 
 
 def m3_resolved_rows(conn, limit: int | None = None) -> list[dict]:
-    """Resolved M3 forecasts + stored dossiers, newest-resolved first.
+    """Resolved M3 forecasts + stored dossiers, newest-entered first, censored at
+    the stated end date (PAP 9.35, as m1_resolved_rows).
 
     GLOB 'm3_evidence*' matches both the Anthropic champion id ('m3_evidence')
     and provider/prompt challenger ids ('m3_evidence@deepseek', 'm3_evidence@v2')
@@ -232,16 +237,16 @@ def m3_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     """
     out: list[dict] = []
     for r in conn.execute(
-        """
+        f"""
         SELECT f.condition_id, f.ts, f.p_market_at_ts AS p_market, r.payout_yes AS outcome,
                r.resolved_ts, e.dossier_json, m.event_id AS event_id
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN evidence_runs e ON e.id = f.evidence_run_id
         JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id GLOB 'm3_evidence*'
-        ORDER BY r.resolved_ts DESC
-        """
+        WHERE f.model_id GLOB 'm3_evidence*' AND {SCOREABLE_SQL}
+        ORDER BY {ENTRY_JD_SQL} DESC
+        """, (now_utc_iso(),)
     ):
         try:
             dossier = json.loads(r["dossier_json"])
@@ -259,17 +264,18 @@ def m4_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     """Resolved m4_ensemble forecasts (Phase 13). `p_yes` here IS today's raw,
     un-extremized pool -- extremization doesn't exist in what's stored yet --
     so it doubles directly as the `p_pooled` fit_extremization_exponent/
-    _m4_extremization_predict expect. Newest-resolved first."""
+    _m4_extremization_predict expect. Newest-entered first, censored at the
+    stated end date (PAP 9.35, as m1_resolved_rows)."""
     rows = [dict(r) for r in conn.execute(
-        """
+        f"""
         SELECT f.condition_id, f.p_yes AS p_pooled, r.payout_yes AS outcome,
                r.resolved_ts, m.category AS category, m.event_id AS event_id
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id = 'm4_ensemble'
-        ORDER BY r.resolved_ts DESC
-        """
+        WHERE f.model_id = 'm4_ensemble' AND {SCOREABLE_SQL}
+        ORDER BY {ENTRY_JD_SQL} DESC
+        """, (now_utc_iso(),)
     )]
     return rows[:limit] if limit else rows
 
@@ -277,15 +283,15 @@ def m4_resolved_rows(conn, limit: int | None = None) -> list[dict]:
 def m7_resolved_rows(conn, limit: int | None = None) -> list[dict]:
     """Resolved m7_crossvenue forecasts (Phase 13), same shape as m4_resolved_rows."""
     rows = [dict(r) for r in conn.execute(
-        """
+        f"""
         SELECT f.condition_id, f.p_yes AS p_pooled, r.payout_yes AS outcome,
                r.resolved_ts, m.category AS category, m.event_id AS event_id
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id = 'm7_crossvenue'
-        ORDER BY r.resolved_ts DESC
-        """
+        WHERE f.model_id = 'm7_crossvenue' AND {SCOREABLE_SQL}
+        ORDER BY {ENTRY_JD_SQL} DESC
+        """, (now_utc_iso(),)
     )]
     return rows[:limit] if limit else rows
 
@@ -302,16 +308,20 @@ def m4_pool_rows(conn) -> list[dict]:
     history Phase 11's skill scoring uses for a different purpose)."""
     from lab.models.m4_ensemble import POOLABLE
 
+    # Censored at the stated end date like every other resolved-row reader
+    # (PAP 9.35). One row per MARKET here, so the market's recorded end date
+    # stands in for the per-forecast frozen one.
     m4_latest = conn.execute(
-        """
+        f"""
         SELECT f.condition_id, MAX(f.ts) AS m4_ts, m.category AS category,
                m.event_id AS event_id, r.payout_yes AS outcome, r.resolved_ts
         FROM forecasts f
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id
         WHERE f.model_id = 'm4_ensemble'
+          AND julianday(m.end_date_iso) <= julianday(?) - {SCORING_LAG_DAYS}
         GROUP BY f.condition_id
-        """
+        """, (now_utc_iso(),)
     ).fetchall()
 
     placeholders = ",".join("?" for _ in POOLABLE)

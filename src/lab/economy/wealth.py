@@ -58,12 +58,21 @@ def log_wealth_delta(side: str, price: float, f: float, payout_yes: float) -> fl
 def update_wealth_ledger(conn, config: dict[str, Any]) -> dict[str, Any]:
     """Idempotent, incremental: append wealth_ledger rows for every resolved
     forecast (every model, unconditional on the shadow portfolio's entry
-    filter) not yet processed, in (resolved_ts, forecast ts) order so
+    filter) not yet processed, in (entry time, forecast ts) order so
     cum_log_wealth compounds correctly. Safe to call every night -- the
     NOT EXISTS guard means reprocessing the same forecast twice is a no-op.
+
+    From 2026-09-28 a forecast joins the ledger only once its stated end date
+    is SCORING_LAG_DAYS past, like every other resolved-row reader (PAP 9.35):
+    MWU derives weights from these rows, and an early-resolution sample is
+    enriched for YES. Rows appended before that date are left as written --
+    the table is derived, and a rebuild would re-sequence every running sum.
     """
+    from lab.eval.run import ENTRY_JD_SQL, SCOREABLE_SQL
+    from lab.util import now_utc_iso
+
     rows = [dict(r) for r in conn.execute(
-        """
+        f"""
         SELECT f.id AS forecast_id, f.condition_id, f.model_id, f.p_yes, f.p_market_at_ts,
                f.ts AS forecast_ts, r.payout_yes, r.resolved_ts,
                m.category AS category, m.event_id AS event_id
@@ -71,8 +80,9 @@ def update_wealth_ledger(conn, config: dict[str, Any]) -> dict[str, Any]:
         JOIN resolutions r ON r.condition_id = f.condition_id AND r.disputed = 0
         JOIN markets m ON m.condition_id = f.condition_id
         WHERE NOT EXISTS (SELECT 1 FROM wealth_ledger w WHERE w.forecast_id = f.id)
-        ORDER BY r.resolved_ts, f.ts
-        """
+          AND {SCOREABLE_SQL}
+        ORDER BY {ENTRY_JD_SQL}, f.ts
+        """, (now_utc_iso(),)
     )]
     if not rows:
         return {"rows_added": 0, "models": []}

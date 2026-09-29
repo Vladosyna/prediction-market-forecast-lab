@@ -71,10 +71,17 @@ def test_log_wealth_delta_hand_computed():
 
 def _seed_resolved_forecast(conn, cid, model_id, p_yes, p_market, outcome, ts, resolved_ts,
                             category="politics"):
+    # The stated end date sits eight days before the recorded resolution, so
+    # PAP 9.35's censoring (end + 7 days) admits the row at exactly its
+    # resolution time: entry order == resolution order, which is what these
+    # ledger-mechanics tests are about.
+    from datetime import datetime
+    end = (datetime.fromisoformat(resolved_ts) - timedelta(days=8)).isoformat(timespec="seconds")
     conn.execute(
-        """INSERT OR IGNORE INTO markets (condition_id, question, category, tier, active, closed)
-           VALUES (?, ?, ?, 'liquid', 1, 1)""",
-        (cid, f"Q {cid}?", category),
+        """INSERT OR IGNORE INTO markets (condition_id, question, category, tier, active, closed,
+                                           end_date_iso)
+           VALUES (?, ?, ?, 'liquid', 1, 1, ?)""",
+        (cid, f"Q {cid}?", category, end),
     )
     db.append_forecast(conn, {
         "ts": ts, "condition_id": cid, "model_id": model_id,
