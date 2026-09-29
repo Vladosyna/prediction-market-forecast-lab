@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from lab.api.clob import ClobClient
+from lab.api.http import describe_error
 from lab.store.snapshots import SnapshotStore, floor_ts_bucket
 from lab.util import now_utc
 
@@ -75,10 +76,11 @@ async def snapshot_markets(clob: ClobClient, store: SnapshotStore, markets: list
         async with sem:
             try:
                 book = await clob.book(m["token_id_yes"])
-            except Exception:
+            except Exception as exc:
                 # Fail soft: one bad market never kills the round (guardrail 9).
                 log.warning("snapshot: book fetch failed",
-                            extra={"ctx": {"condition_id": m["condition_id"]}})
+                            extra={"ctx": {"condition_id": m["condition_id"],
+                                           "error": describe_error(exc)}})
                 return None
         if book.mid is None:
             return None

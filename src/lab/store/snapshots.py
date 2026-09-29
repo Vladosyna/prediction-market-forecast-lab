@@ -169,8 +169,8 @@ class SnapshotStore:
             return pl.DataFrame(schema=schema)
         return pl.concat(frames, how="diagonal")
 
-    def latest_per_market(self, dates: list[str],
-                          columns: list[str] | None = None) -> pl.DataFrame:
+    def latest_per_market(self, dates: list[str], columns: list[str] | None = None,
+                          condition_ids: Iterable[str] | None = None) -> pl.DataFrame:
         """Most recent snapshot row per condition_id across `dates`.
 
         Reduced one day at a time rather than over a single concatenated frame:
@@ -178,12 +178,14 @@ class SnapshotStore:
         chronological order agree, and the last-of-the-per-day-lasts is the
         overall last), but the peak is one day's partition instead of the whole
         window. Defaults to `LATEST_PER_MARKET_COLUMNS` -- see there for why the
-        order-book blobs are excluded.
+        order-book blobs are excluded. `condition_ids` filters inside the scan,
+        for callers that need a handful of markets rather than all of them.
         """
         cols = columns if columns is not None else LATEST_PER_MARKET_COLUMNS
+        wanted = list(condition_ids) if condition_ids is not None else None
         reduced = []
         for date in dates:
-            day = self.read_range([date], columns=cols)
+            day = self.read_range([date], columns=cols, condition_ids=wanted)
             if not day.is_empty():
                 reduced.append(day.sort("ts").group_by("condition_id").last())
         if not reduced:

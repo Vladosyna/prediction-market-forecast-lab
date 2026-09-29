@@ -145,8 +145,12 @@ def setup_logging(config: dict[str, Any] | None = None, level: int = logging.INF
     console.addFilter(redact)
     root.addHandler(console)
 
+    # 20 x 20 MB (2026-09-29). Five files held ~2.3 days on 2026-09-28, most of
+    # it one RPS warning per event per statistic (~97k a night, since removed):
+    # the evidence for the 09-26 coverage dip had rotated out by the next
+    # afternoon. Disk is not the constraint (400 MB against ~30 GB free).
     file_handler = logging.handlers.RotatingFileHandler(
-        logs_dir / "lab.jsonl", maxBytes=20_000_000, backupCount=5, encoding="utf-8"
+        logs_dir / "lab.jsonl", maxBytes=20_000_000, backupCount=20, encoding="utf-8"
     )
     file_handler.setFormatter(JsonLinesFormatter())
     file_handler.addFilter(redact)

@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from lab.api.http import BaseClient, TokenBucket
+from lab.api.http import BaseClient, TokenBucket, describe_error
 
 log = logging.getLogger(__name__)
 
@@ -116,8 +116,9 @@ class KalshiClient(BaseClient):
 
         try:
             raw = await self.get_json(f"/markets/{ticker}/orderbook")
-        except Exception:
-            log.warning("kalshi: orderbook fetch failed", extra={"ctx": {"ticker": ticker}})
+        except Exception as exc:
+            log.warning("kalshi: orderbook fetch failed",
+                        extra={"ctx": {"ticker": ticker, "error": describe_error(exc)}})
             return None
         book = (raw or {}).get("orderbook_fp") or (raw or {}).get("orderbook")
         if not isinstance(book, dict):
@@ -170,8 +171,9 @@ class KalshiClient(BaseClient):
     async def market(self, ticker: str) -> KalshiMarket | None:
         try:
             raw = await self.get_json(f"/markets/{ticker}")
-        except Exception:
-            log.warning("kalshi: market fetch failed", extra={"ctx": {"ticker": ticker}})
+        except Exception as exc:
+            log.warning("kalshi: market fetch failed",
+                        extra={"ctx": {"ticker": ticker, "error": describe_error(exc)}})
             return None
         item = raw.get("market") if isinstance(raw, dict) else None
         if not item:

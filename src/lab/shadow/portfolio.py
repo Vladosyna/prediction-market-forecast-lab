@@ -200,14 +200,21 @@ def portfolio_summary(conn, store, config: dict[str, Any]) -> dict[str, Any]:
     from lab.store.snapshots import utc_date_str
     from lab.util import now_utc
 
-    latest = store.latest_per_market(
-        [utc_date_str(now_utc() - timedelta(days=d)) for d in range(2)]
-    )
-    mids = {r["condition_id"]: r["mid"] for r in latest.to_dicts()} if not latest.is_empty() else {}
-    unrealized = 0.0
     open_rows = conn.execute(
         "SELECT condition_id, token_side, entry_price, stake_sim FROM shadow_trades WHERE status='open'"
     ).fetchall()
+    # Only the open book's own markets (2026-09-29): reading every market's
+    # latest snapshot to value ~14 positions took the weekly report from 325 to
+    # 861 MB, its largest allocation, inside a unit capped at 1.37 GB.
+    mids: dict[str, float] = {}
+    if open_rows:
+        latest = store.latest_per_market(
+            [utc_date_str(now_utc() - timedelta(days=d)) for d in range(2)],
+            condition_ids={r["condition_id"] for r in open_rows},
+        )
+        if not latest.is_empty():
+            mids = {r["condition_id"]: r["mid"] for r in latest.to_dicts()}
+    unrealized = 0.0
     for r in open_rows:
         mid = mids.get(r["condition_id"])
         if mid is None:

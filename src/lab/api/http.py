@@ -47,6 +47,14 @@ class TokenBucket:
                 await asyncio.sleep((1.0 - self._tokens) / self.rate)
 
 
+def describe_error(exc: BaseException) -> str:
+    """"HTTP 404" for a status error, else the exception's class name -- for
+    fail-soft warnings, which otherwise log a bare "failed" (str() of a
+    timeout is empty) and leave nothing to diagnose from."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return f"HTTP {status}" if status else type(exc).__name__
+
+
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         code = exc.response.status_code

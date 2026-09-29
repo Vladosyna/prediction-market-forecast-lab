@@ -11,12 +11,24 @@ Metaculus, NewsAPI).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
 import httpx
 
+from lab.api.http import describe_error
+
 log = logging.getLogger(__name__)
+
+# A transport failure is retried before it is given up on (2026-09-29). Three
+# collector pings failed on 2026-09-28, all at :12 past the hour -- the minute
+# every hourly job starts together on this one-core host. The collector pings
+# every five minutes, so none of those was an outage to the monitor; a backup
+# ping, sent once a night, has no next ping to cover for it. The failures also
+# logged an empty error (str() of a timeout), which is why they now carry the
+# exception type. Delays in seconds before the second and third attempts.
+RETRY_DELAYS_S = (10.0, 30.0)
 
 
 ALARM_PREFIX = "alarm:"
@@ -63,24 +75,37 @@ async def send_heartbeat(source: str, fail_reason: str | None = None) -> bool:
     url = os.environ.get("HEARTBEAT_URL", "").strip()
     if not url:
         return False
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            if fail_reason:
-                resp = await client.post(url.rstrip("/") + "/fail",
-                                         content=fail_reason.encode("utf-8")[:10000])
-                if getattr(resp, "status_code", 200) >= 400:
-                    log.warning("heartbeat /fail rejected -- sending nothing, the grace "
-                                "period will alert", extra={"ctx": {"source": source}})
-                    return False
-            else:
-                await client.get(url)
-        return True
-    except (httpx.HTTPError, httpx.InvalidURL) as exc:
-        # httpx.InvalidURL (e.g. a malformed HEARTBEAT_URL typo -- unbalanced
-        # brackets, bad IDNA host) is NOT a subclass of httpx.HTTPError, so it
-        # must be caught explicitly here too -- otherwise a bad env value
-        # would violate this function's "never raises" contract and, via
-        # jobs.run_publish_job's shared try block, could make a successful
-        # backup get reported as a publish failure.
-        log.warning("heartbeat ping failed", extra={"ctx": {"source": source, "error": str(exc)}})
-        return False
+    last_error: BaseException | None = None
+    for attempt in range(len(RETRY_DELAYS_S) + 1):
+        if attempt:
+            await asyncio.sleep(RETRY_DELAYS_S[attempt - 1])
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                if fail_reason:
+                    resp = await client.post(url.rstrip("/") + "/fail",
+                                             content=fail_reason.encode("utf-8")[:10000])
+                    if getattr(resp, "status_code", 200) >= 400:
+                        # An answer, not a transport failure: retrying would
+                        # get the same answer.
+                        log.warning("heartbeat /fail rejected -- sending nothing, the grace "
+                                    "period will alert", extra={"ctx": {"source": source}})
+                        return False
+                else:
+                    await client.get(url)
+            return True
+        except httpx.InvalidURL as exc:
+            # httpx.InvalidURL (e.g. a malformed HEARTBEAT_URL typo -- unbalanced
+            # brackets, bad IDNA host) is NOT a subclass of httpx.HTTPError, so it
+            # must be caught explicitly here too -- otherwise a bad env value
+            # would violate this function's "never raises" contract and, via
+            # jobs.run_publish_job's shared try block, could make a successful
+            # backup get reported as a publish failure. A configuration error:
+            # no retry.
+            last_error = exc
+            break
+        except httpx.HTTPError as exc:
+            last_error = exc
+    log.warning("heartbeat ping failed",
+                extra={"ctx": {"source": source, "error": describe_error(last_error),
+                               "attempts": attempt + 1}})
+    return False

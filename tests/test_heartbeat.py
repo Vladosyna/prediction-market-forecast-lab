@@ -80,11 +80,33 @@ def test_send_heartbeat_success(monkeypatch):
 
 def test_send_heartbeat_swallows_network_error(monkeypatch):
     monkeypatch.setenv("HEARTBEAT_URL", "https://hc-ping.com/fake-uuid")
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: _RaisingClient())
+    monkeypatch.setattr("lab.heartbeat.RETRY_DELAYS_S", (0.0, 0.0))
+    attempts: list[int] = []
+
+    def factory(*a, **k):
+        attempts.append(1)
+        return _RaisingClient()
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
 
     result = asyncio.run(send_heartbeat("collector"))
 
     assert result is False
+    assert len(attempts) == 3, "a transport failure is retried before it is given up on"
+
+
+def test_a_transient_failure_does_not_cost_the_ping(monkeypatch):
+    """Three collector pings failed on 2026-09-28, all at :12 -- the minute
+    every hourly job starts at once. The collector's next ping covers for one
+    five minutes later; the nightly backup ping has no next ping."""
+    monkeypatch.setenv("HEARTBEAT_URL", "https://hc-ping.com/fake-uuid")
+    monkeypatch.setattr("lab.heartbeat.RETRY_DELAYS_S", (0.0, 0.0))
+    requests: list[str] = []
+    clients = iter([_RaisingClient(), _RecordingClient(requests)])
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: next(clients))
+
+    assert asyncio.run(send_heartbeat("collector")) is True
+    assert requests == ["https://hc-ping.com/fake-uuid"]
 
 
 def test_send_heartbeat_swallows_malformed_url(monkeypatch):
