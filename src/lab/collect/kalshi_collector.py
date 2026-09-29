@@ -388,13 +388,15 @@ def drop_unsampled_sports(conn, config: dict[str, Any],
 
 def tracked_kalshi_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
     """Phase 17 item 3: an explicit, small set of Kalshi markets (confirmed
-    cross-venue pairs) rather than every open Kalshi market."""
+    cross-venue pairs) rather than every open Kalshi market. Open legs only,
+    for the reason `snapshots.tracked_markets_by_ids` gives (2026-09-29)."""
     if not condition_ids:
         return []
     placeholders = ",".join("?" * len(condition_ids))
     rows = conn.execute(
         f"SELECT condition_id, venue_native_id FROM markets "
-        f"WHERE venue = 'kalshi' AND condition_id IN ({placeholders})",
+        f"WHERE venue = 'kalshi' AND condition_id IN ({placeholders}) "
+        f"AND active = 1 AND closed = 0",
         tuple(condition_ids),
     ).fetchall()
     return [dict(r) for r in rows]

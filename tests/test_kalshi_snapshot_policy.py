@@ -313,3 +313,28 @@ def test_a_market_the_venue_reports_closed_is_flagged_for_the_watcher(config, co
     assert flags["kalshi:KXCPI-26SEP-T0"] == (0, 1)
     assert flags["kalshi:KXCPI-26SEP-T1"] == (1, 0)
     assert [m["condition_id"] for m in unresolved_kalshi_markets(conn)] == ["kalshi:KXCPI-26SEP-T0"]
+
+
+def test_the_matched_pair_job_skips_legs_that_stopped_trading(config, conn):
+    """A confirmed pair outlives its markets: 71 of 212 Polymarket legs were
+    being requested every two minutes for a 404 order book, which overran the
+    round and made APScheduler skip 38% of firings (2026-09-29)."""
+    from lab.collect.snapshots import tracked_markets_by_ids
+
+    open_k = _seed(conn, "KXCPI-26SEP-T1", "economics")
+    done_k = _seed(conn, "KXCPI-26SEP-T2", "economics")
+    for cid, token in (("0xopen", "tok-open"), ("0xdone", "tok-done")):
+        db.upsert_market(conn, {
+            "condition_id": cid, "slug": None, "question": "q?", "category": "economics",
+            "description": "d", "end_date_iso": None, "token_id_yes": token,
+            "token_id_no": None, "neg_risk": 0, "active": 1, "closed": 0,
+            "liquidity_num": 1.0, "volume_num": 1.0, "tier": "liquid",
+        })
+    conn.execute("UPDATE markets SET active = 0, closed = 1 WHERE condition_id IN (?, ?)",
+                 (done_k, "0xdone"))
+    conn.commit()
+
+    assert [r["condition_id"] for r in tracked_kalshi_markets_by_ids(conn, [open_k, done_k])] \
+        == [open_k]
+    assert [r["condition_id"] for r in tracked_markets_by_ids(conn, ["0xopen", "0xdone"])] \
+        == ["0xopen"]

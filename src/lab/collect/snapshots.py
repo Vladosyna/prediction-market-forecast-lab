@@ -34,13 +34,21 @@ def tracked_markets(conn, tier: str) -> list[dict]:
 
 def tracked_markets_by_ids(conn, condition_ids: list[str]) -> list[dict]:
     """Phase 17 item 3: an explicit, small set of markets (confirmed
-    cross-venue pairs) rather than a whole tier."""
+    cross-venue pairs) rather than a whole tier.
+
+    Open markets only (2026-09-29). A confirmed pair stays in markets_map.yaml
+    after either leg resolves, and a resolved Polymarket market has no order
+    book: 71 of the 212 Polymarket legs were being requested every two minutes
+    for a 404, which pushed the round past its own interval and made APScheduler
+    skip 38% of firings -- thinning the lead-lag series (PAP H3) of the pairs
+    that were still trading."""
     if not condition_ids:
         return []
     placeholders = ",".join("?" * len(condition_ids))
     rows = conn.execute(
         f"SELECT condition_id, token_id_yes FROM markets "
-        f"WHERE condition_id IN ({placeholders}) AND token_id_yes IS NOT NULL",
+        f"WHERE condition_id IN ({placeholders}) AND token_id_yes IS NOT NULL "
+        f"AND active = 1 AND closed = 0",
         tuple(condition_ids),
     ).fetchall()
     return [dict(r) for r in rows]
