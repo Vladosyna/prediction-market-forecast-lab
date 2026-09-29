@@ -1434,11 +1434,15 @@ one, because a "will X happen by date" market resolves early precisely when X ha
 a stratum is *defined*. It did not fix which forecasts are *in* it: every statistic was computed over
 "everything resolved by tonight", and a market still inside its stated window is resolved by tonight
 only if it went YES — its NO siblings, which resolve on the date, are not in yet. Measured on
-2026-09-28 over Polymarket `m0_market` rows in the confirmatory window (market-side quantities only,
-as in 9.31): the stated ≥30-day stratum held **195 event clusters, 54.8% YES, price minus outcome
-−0.037**; the **50 clusters whose stated date had not yet arrived were 80% YES**, and removing them
-leaves **145 clusters, 41.9% YES, +0.048**. The stated >90-day stratum consisted of nothing but such
-markets (38 clusters, 80% YES, −0.215). Pooled over all Polymarket horizons, 7.3% of resolved rows
+2026-09-28 16:00 UTC over Polymarket `m0_market` rows in the confirmatory window (market-side
+quantities only, as in 9.31): the stated ≥30-day stratum held **193 event clusters, 53.8% YES, price
+minus outcome −0.031**; the **45 clusters whose stated date had not yet arrived were 79% YES
+(−0.196)**; under the rule below, which also defers 9 clusters whose date passed less than seven
+days earlier, **145 clusters remain, 42.0% YES, +0.047**. The stated >90-day stratum consisted of
+nothing but such markets (37–38 clusters, 79–80% YES, −0.21 depending on the hour measured).
+*(Corrected the same day, before any result was read: the first version of this sentence gave "50
+clusters ... 80% YES", subtracting two counts taken at different hours and quoting the >90-day
+rate; the figures above come from one query at one reference time.)* Pooled over all Polymarket horizons, 7.3% of resolved rows
 were early resolutions of markets whose date had not come (81% YES). Kalshi carried none: every
 resolved Kalshi market in the sample had passed its stated close.
 
