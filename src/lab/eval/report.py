@@ -137,7 +137,7 @@ the fitted a gets applied at forecast time.</p>
 <p class="note">Ranked Probability Score over Polymarket negRisk bucketed events (Phase 16) --
 e.g. CPI ranges, temperature bands scored as one ordered distribution instead of independent
 binary legs. An event counts only when every leg it had was forecast in the same pass and the
-legs' numbers give a strict order (PAP 9.37); values computed before 2026-09-28 used a different,
+legs' numbers give a strict order (PAP 9.37); values computed before 2026-09-29 used a different,
 invalid assembly and are withdrawn. <b>Secondary to the binary Brier table above</b>, which stays
 the sole primary, pre-registered statistic. A row appears here only once a
 model/venue/category/window has resolved at least {{ min_bucketed_events }} bucketed events --

@@ -47,7 +47,7 @@ def test_coherence_deviation_is_zero_for_a_coherent_pool():
     assert coherence_deviation([0.3, 0.3, 0.3]) == pytest.approx(0.1)
 
 
-# --- bucketed_events (rewritten 2026-09-28, PAP 9.37) ----------------------
+# --- bucketed_events (rewritten 2026-09-29, PAP 9.37) ----------------------
 
 T1 = "2026-07-01T02:00:00+00:00"
 T2 = "2026-07-02T02:00:00+00:00"

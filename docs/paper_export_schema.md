@@ -133,5 +133,5 @@ lab's own numbers, apply exactly these rules (they live in code as
   resolution and stated end + 7 days.
 
 The first three rules were enforced in the lab's own evaluation from
-2026-09-25, the censoring from 2026-09-28; eval rows written before those
+2026-09-25, the censoring from 2026-09-29; eval rows written before those
 dates do not apply them.

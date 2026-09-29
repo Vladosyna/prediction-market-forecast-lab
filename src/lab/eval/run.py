@@ -47,7 +47,7 @@ KALSHI_EXCLUSION_WINDOWS = (
     ("2026-09-02", "2026-09-07"),   # PAP 9.26
     ("2026-09-18", "2026-09-25"),   # PAP 9.30 -- rate budget, lock storm, OOM loop
 )
-# PAP 9.35 (2026-09-28): a forecast enters any statistic only once its
+# PAP 9.35 (2026-09-29): a forecast enters any statistic only once its
 # market's STATED end date is this many days in the past. Scoring "whatever
 # has resolved by tonight" conditions on the outcome: a "by date" market
 # resolves early precisely when the event happens, so a market still inside
@@ -192,7 +192,7 @@ def _per_cluster_diffs_in_resolution_order(
     """One mean diff per event-cluster, ordered by each cluster's earliest
     resolution -- what the anytime-valid CS treats as its sequential sample
     (brief section 7: "n counts resolved event clusters, not venue-market
-    rows"). From 2026-09-28 the caller passes each row's entry time into the
+    rows"). From 2026-09-29 the caller passes each row's entry time into the
     scored set instead (PAP 9.35), which equals its resolution time whenever
     the outcome was recorded after the stated end date plus the lag."""
     # Deterministic order (2026-09-25, PAP 9.32): resolution time, then cluster
@@ -547,7 +547,7 @@ ROBUSTNESS_CHECKS: dict[str, dict[str, Any]] = {
     "non_negrisk": {"pap": "9.3(a)", "suffix": "_non_negrisk", "models": M1_FAMILY,
                     "filter": lambda rows: [r for r in rows if not r.get("neg_risk")]},
     # 9.35: everything resolved by tonight, early resolutions included -- the
-    # rule every row was scored under until 2026-09-28, kept as a sensitivity.
+    # rule every row was scored under until 2026-09-29, kept as a sensitivity.
     "uncensored": {"pap": "9.35", "suffix": "_uncensored", "censor": False},
 }
 

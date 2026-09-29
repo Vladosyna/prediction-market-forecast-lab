@@ -1424,7 +1424,7 @@ two forecasts' marginal distributions and is not zero in general — a recalibra
 extremizes would be expected to lose, not tie. A larger known-zero sample is the honest way to add
 power to a placebo, so that is what is done.
 
-**Addendum 9.35 (2026-09-28).** A forecast enters any statistic only once its market's stated end
+**Addendum 9.35 (2026-09-29).** A forecast enters any statistic only once its market's stated end
 date is seven days past. This changes which resolved forecasts every statistic is computed on, H1's
 primary one included, so the reasons are given in full, and the previous rule is kept as a named
 sensitivity analysis.
@@ -1495,10 +1495,10 @@ earlier clusters were never evidence about long horizons, only about which marke
 buckets have the same inclusion structure. It has not been measured here and the curves in
 production are unchanged; it is recorded as a limitation of M1's prior for the paper.
 
-**Discontinuity.** `eval_runs` rows from 2026-09-28 apply the rule; earlier rows do not, and the
-`_uncensored` check reproduces them.
+**Discontinuity.** `eval_runs` rows written after this rule was deployed (2026-09-29) apply it;
+earlier rows do not, and the `_uncensored` check reproduces them.
 
-**Addendum 9.36 (2026-09-28).** The null control's sample is drawn so that membership is a property
+**Addendum 9.36 (2026-09-29).** The null control's sample is drawn so that membership is a property
 of each market, not of the pool it was drawn from. Purpose, size and venues are unchanged from 9.34;
 this corrects how the draw is made, because the draw as implemented had stopped Kalshi's control
 from running.
@@ -1529,7 +1529,7 @@ control's scoring, whose membership is read off the ledger. Which markets they c
 the coincidence of two seeded draws, neither of which depends on outcomes, so they are valid placebo
 observations — there are simply far fewer of them on Kalshi than 9.26 and 9.34 intended.
 
-**Addendum 9.37 (2026-09-28).** The distributional secondary outcome (RPS, Phase 16) was computed on
+**Addendum 9.37 (2026-09-29).** The distributional secondary outcome (RPS, Phase 16) was computed on
 an invalid set of events; every RPS value written before this date is withdrawn, and a statement in
 9.33 about it is corrected. Binary Brier remains the sole primary outcome; nothing about H1–H3
 changes.

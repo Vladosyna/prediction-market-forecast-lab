@@ -108,7 +108,7 @@ def test_sample_is_deterministic_for_a_fixed_pool(conn):
 
 
 def test_membership_survives_the_pool_changing_around_it(conn):
-    """THE 2026-09-28 regression (PAP 9.36). `random.sample` over the current
+    """THE 2026-09-29 regression (PAP 9.36). `random.sample` over the current
     pool re-dealt the whole sample whenever one market listed or settled, so
     the Kalshi snapshot round and the forecast pass drew different samples and
     Kalshi's control fell to 56, 7, 2 markets a day. A member must stay a

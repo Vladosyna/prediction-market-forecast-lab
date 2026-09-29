@@ -6,7 +6,7 @@ bucket as an isolated binary discards the cross-bucket structure; this
 module assembles the per-model implied distribution over an event's buckets
 so `eval/scoring.py::rps` can score the whole shape at once.
 
-What counts as a bucketed event (rewritten 2026-09-28, PAP 9.37). The first
+What counts as a bucketed event (rewritten 2026-09-29, PAP 9.37). The first
 version grouped legs by `markets.event_id` and admitted an event when exactly
 one of its FORECAST legs resolved YES and every leg's question held a number.
 Each of those three turned out to be wrong in production:

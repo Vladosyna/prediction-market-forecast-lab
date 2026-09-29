@@ -62,7 +62,7 @@ def update_wealth_ledger(conn, config: dict[str, Any]) -> dict[str, Any]:
     cum_log_wealth compounds correctly. Safe to call every night -- the
     NOT EXISTS guard means reprocessing the same forecast twice is a no-op.
 
-    From 2026-09-28 a forecast joins the ledger only once its stated end date
+    From 2026-09-29 a forecast joins the ledger only once its stated end date
     is SCORING_LAG_DAYS past, like every other resolved-row reader (PAP 9.35):
     MWU derives weights from these rows, and an early-resolution sample is
     enriched for YES. Rows appended before that date are left as written --

@@ -484,7 +484,7 @@ def test_the_confidence_sequence_does_not_depend_on_row_order():
         assert (cs.lo, cs.hi) == pytest.approx((ref.lo, ref.hi))
 
 
-# --- stated-end censoring (2026-09-28, PAP 9.35) ------------------------------
+# --- stated-end censoring (2026-09-29, PAP 9.35) ------------------------------
 
 def _mk_resolved(conn, cid, forecast_ts, resolved_ts, payout, end=None, frozen_days=None):
     db.upsert_market(conn, {
@@ -574,7 +574,7 @@ def test_entry_time_is_the_later_of_resolution_and_stated_end_plus_lag(config):
 
 
 def test_the_uncensored_sensitivity_is_a_named_check_beside_the_primary(config):
-    """The rule every row was scored under until 2026-09-28 is kept, under its
+    """The rule every row was scored under until 2026-09-29 is kept, under its
     own label, so the effect of the change is reportable."""
     from lab.eval.run import run_robustness_checks
 
@@ -611,7 +611,7 @@ def test_the_learning_loop_reads_the_same_censored_sample(config):
     conn.close()
 
 
-# --- RPS scoped to its own row (2026-09-28, PAP 9.37) -------------------------
+# --- RPS scoped to its own row (2026-09-29, PAP 9.37) -------------------------
 
 def test_rps_is_computed_on_the_rows_of_its_own_statistic(config, monkeypatch):
     """RPS used to be recomputed for every row from ALL of a model's resolved
