@@ -19,7 +19,7 @@ import numpy as np
 
 from lab.eval.anytime import confidence_sequence
 from lab.eval.calibration import calibration_bins
-from lab.eval.distributional import bucketed_resolved_events
+from lab.eval.distributional import bucketed_events, negrisk_legs
 from lab.eval.scoring import brier, paired_rps_skill, paired_skill
 from lab.eval.stratified import precision_weighted_skill
 from lab.store import db as dbmod
@@ -220,6 +220,7 @@ def _per_cluster_diffs_in_resolution_order(
 def evaluate_model(
     conn, model_id: str, window_label: str, rows: list[dict], config: dict[str, Any],
     venue: str | None = None, category: str | None = None, window_days: int | None = None,
+    legs: dict[str, dict[str, tuple[str, str]]] | None = None,
 ) -> dict[str, Any] | None:
     if not rows:
         return None
@@ -249,26 +250,19 @@ def evaluate_model(
 
     # Phase 16 (v2.4): RPS is a SECONDARY outcome on this same eval_runs row --
     # binary Brier above stays the sole primary, pre-registered statistic.
-    # Bucketed events naturally only ever exist for the venue that carries
-    # negRisk groupings (Polymarket); a cross-venue confirmed pair's synthetic
-    # external-venue condition_id never accrues its own forecasts (M7 pools
-    # external prices as an INPUT to the Polymarket-side forecast, it never
-    # writes one for the external leg), so it can never satisfy the >=2-legs
-    # check below -- no explicit venue filter needed to keep the two event_id
-    # use-cases from colliding.
-    # ALL_CATEGORIES/null_control rows pool across every category (no single
-    # category to filter bucketed events to); null_control specifically
-    # doesn't further restrict to sports-only bucketed events here -- a
-    # stated simplification, since RPS is already a secondary metric and
-    # threading null-control condition_ids through this pipeline too would
-    # add real machinery for a case that will be rare (few sports events are
-    # themselves bucketed numeric questions).
-    bucketed_category = None if category == ALL_CATEGORIES else category
+    # Assembled from exactly these rows (PAP 9.37), so it carries this row's
+    # venue, category, window, exclusions and censoring. Only Polymarket
+    # negRisk groups are mutually exclusive by construction, so no other
+    # venue can contribute an event.
     rps_result = None
-    n_bucketed = config["eval"].get("min_bucketed_events", 20)
-    events = bucketed_resolved_events(conn, model_id, category=bucketed_category,
-                                      window_days=window_days)
-    if len(events) >= n_bucketed:
+    events: list[dict[str, Any]] = []
+    if (venue or "polymarket") == "polymarket":
+        events, skipped = bucketed_events(rows, legs if legs is not None else negrisk_legs(conn))
+        if skipped:
+            log.debug("distributional: events not scored",
+                      extra={"ctx": {"model_id": model_id, "window": window_label,
+                                     "category": category, **skipped}})
+    if len(events) >= config["eval"].get("min_bucketed_events", 20):
         rps_result = paired_rps_skill(events, iterations=config["eval"]["bootstrap_iterations"])
 
     conn.execute(
@@ -380,6 +374,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
     scoreable_at = now_utc_iso() if censor else None
 
     nc_ids_by_venue = null_control_ids_by_venue(conn, config)
+    legs = negrisk_legs(conn)   # once per run: every RPS statistic reads it
     model_ids = [r["model_id"] for r in conn.execute(
         "SELECT DISTINCT model_id FROM forecasts ORDER BY model_id"
     ) if models is None or r["model_id"] in models]
@@ -413,7 +408,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                     rows = keep(rows)
                     summary = evaluate_model(
                         conn, model_id, label + label_suffix, rows, config,
-                        venue=venue, category=category, window_days=days,
+                        venue=venue, category=category, window_days=days, legs=legs,
                     )
                     if summary:
                         out.append(summary)
@@ -429,7 +424,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                 rows = keep(rows)
                 summary = evaluate_model(
                     conn, model_id, label + label_suffix, rows, config,
-                    venue=venue, category=ALL_CATEGORIES, window_days=days,
+                    venue=venue, category=ALL_CATEGORIES, window_days=days, legs=legs,
                 )
                 if summary:
                     out.append(summary)
@@ -456,7 +451,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                         h_summary = evaluate_model(
                             conn, model_id, f"{label}_{tag}_{bucket}" + label_suffix,
                             bucket_rows, config, venue=venue,
-                            category=ALL_CATEGORIES, window_days=days,
+                            category=ALL_CATEGORIES, window_days=days, legs=legs,
                         )
                         if h_summary:
                             out.append(h_summary)
@@ -480,7 +475,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
             nc_rows = keep(nc_rows)
             nc_summary = evaluate_model(
                 conn, model_id, "null_control" + label_suffix, nc_rows, config,
-                venue=venue, category=ALL_CATEGORIES, window_days=None,
+                venue=venue, category=ALL_CATEGORIES, window_days=None, legs=legs,
             )
             if nc_summary:
                 out.append(nc_summary)

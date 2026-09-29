@@ -8,9 +8,10 @@ import numpy as np
 import pytest
 
 from lab.eval.distributional import (
-    bucketed_resolved_events,
+    bucketed_events,
     coherence_deviation,
     implied_cdf,
+    negrisk_legs,
     parse_bucket_order,
 )
 from lab.eval.scoring import brier, paired_rps_skill, rps
@@ -46,70 +47,107 @@ def test_coherence_deviation_is_zero_for_a_coherent_pool():
     assert coherence_deviation([0.3, 0.3, 0.3]) == pytest.approx(0.1)
 
 
-# --- bucketed_resolved_events -----------------------------------------------
+# --- bucketed_events (rewritten 2026-09-28, PAP 9.37) ----------------------
 
-def _seed_leg(conn, cid, event_id, question, p_yes, p_market, payout_yes, ts="2026-07-01T00:00:00+00:00"):
-    conn.execute(
-        """INSERT INTO markets (condition_id, question, category, tier, active, closed, event_id)
-           VALUES (?, ?, 'economics', 'liquid', 1, 1, ?)""",
-        (cid, question, event_id),
-    )
-    db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": "m_test",
-                             "p_yes": p_yes, "p_market_at_ts": p_market})
-    db.record_resolution(conn, cid, ts, payout_yes, False, "gamma")
+T1 = "2026-07-01T02:00:00+00:00"
+T2 = "2026-07-02T02:00:00+00:00"
+SEEN = "2026-06-01T00:00:00+00:00"
 
 
-def test_bucketed_resolved_events_groups_and_orders_by_bucket(tmp_path):
-    conn = db.connect(tmp_path / "lab.db")
-    _seed_leg(conn, "0x1", "evt1", "Will CPI be between 3.0% and 3.5%?", 0.2, 0.25, 0.0)
-    _seed_leg(conn, "0x2", "evt1", "Will CPI be between 3.5% and 4.0%?", 0.6, 0.55, 1.0)
-    _seed_leg(conn, "0x3", "evt1", "Will CPI be between 4.0% and 4.5%?", 0.2, 0.20, 0.0)
-    conn.commit()
+def _legs(event_id, questions, seen=SEEN):
+    return {event_id: {f"{event_id}_{i}": (q, seen) for i, q in enumerate(questions)}}
 
-    events = bucketed_resolved_events(conn, "m_test")
-    assert len(events) == 1
-    e = events[0]
-    assert e["event_id"] == "evt1"
-    assert e["condition_ids"] == ["0x1", "0x2", "0x3"]  # bucket-ordered: 3.0 < 3.5 < 4.0
+
+def _row(event_id, i, p_yes, p_market, payout, ts=T1, venue="polymarket"):
+    return {"condition_id": f"{event_id}_{i}", "event_id": event_id, "venue": venue,
+            "forecast_ts": ts, "p_yes": p_yes, "p_market_at_ts": p_market,
+            "payout_yes": payout, "resolved_ts": "2026-07-10T00:00:00+00:00",
+            "category": "economics"}
+
+
+CPI = ["Will CPI be between 4.0% and 4.5%?", "Will CPI be between 3.0% and 3.5%?",
+       "Will CPI be between 3.5% and 4.0%?"]
+
+
+def test_a_complete_pass_is_bucket_ordered():
+    legs = _legs("e", CPI)
+    rows = [_row("e", 0, 0.2, 0.20, 0.0), _row("e", 1, 0.2, 0.25, 0.0),
+            _row("e", 2, 0.6, 0.55, 1.0)]
+    events, skipped = bucketed_events(rows, legs)
+    assert skipped == {}
+    (e,) = events
+    assert e["condition_ids"] == ["e_1", "e_2", "e_0"]      # 3.0 < 3.5 < 4.0
     assert e["y_bucket_idx"] == 1
     assert e["p_model"] == pytest.approx([0.2, 0.6, 0.2])
-    conn.close()
 
 
-def test_bucketed_resolved_events_skips_malformed_group_with_two_true_legs(tmp_path):
+def test_an_event_whose_winner_was_never_forecast_is_not_scored():
+    """THE outcome-selection regression. A leg priced outside the forecast
+    bounds is never forecast; the old rule ("exactly one forecast leg won")
+    kept events a forecast leg won and dropped the ones an unforecast leg
+    won. Completeness is known before the outcome; which leg won is not."""
+    legs = _legs("e", CPI)
+    rows = [_row("e", 1, 0.3, 0.3, 0.0), _row("e", 2, 0.7, 0.7, 1.0)]   # e_0 never forecast
+    events, skipped = bucketed_events(rows, legs)
+    assert events == [] and skipped == {"no_complete_pass": 1}
+
+
+def test_the_latest_complete_pass_is_used():
+    legs = _legs("e", CPI)
+    rows = [_row("e", i, p, 0.33, float(i == 2), ts=T1) for i, p in enumerate((0.1, 0.2, 0.7))]
+    # a later pass missing one leg (it left the price bounds) does not count
+    rows += [_row("e", 1, 0.5, 0.5, 0.0, ts=T2), _row("e", 2, 0.5, 0.5, 1.0, ts=T2)]
+    (e,) = bucketed_events(rows, legs)[0]
+    assert e["p_model"] == pytest.approx([0.2, 0.7, 0.1])    # the T1 pass, bucket-ordered
+
+
+def test_a_leg_listed_after_the_pass_is_not_required():
+    legs = _legs("e", CPI)
+    legs["e"]["e_0"] = (CPI[0], "2026-07-01T12:00:00+00:00")   # listed after T1
+    rows = [_row("e", 1, 0.3, 0.3, 0.0), _row("e", 2, 0.7, 0.7, 1.0)]
+    (e,) = bucketed_events(rows, legs)[0]
+    assert e["condition_ids"] == ["e_1", "e_2"]
+
+
+def test_categorical_and_unparseable_groups_are_not_ordinal():
+    """Every question held a number but the numbers were one shared year: the
+    old rule scored such categorical events in arbitrary order."""
+    legs = {**_legs("cat", ["Will Alice win the 2026 race?", "Will Bob win the 2026 race?"]),
+            **_legs("words", ["Will the incumbent win?", "Will the challenger win?"])}
+    rows = [_row("cat", 0, 0.4, 0.4, 0.0), _row("cat", 1, 0.6, 0.6, 1.0),
+            _row("words", 0, 0.4, 0.4, 0.0), _row("words", 1, 0.6, 0.6, 1.0)]
+    events, skipped = bucketed_events(rows, legs)
+    assert events == [] and skipped == {"unordered": 2}
+
+
+def test_not_exactly_one_winner_is_malformed():
+    legs = _legs("e", CPI[:2])
+    rows = [_row("e", 0, 0.5, 0.5, 1.0), _row("e", 1, 0.5, 0.5, 1.0)]
+    events, skipped = bucketed_events(rows, legs)
+    assert events == [] and skipped == {"not_one_winner": 1}
+
+
+def test_only_polymarket_negrisk_groups_contribute(tmp_path):
+    """event_id is a clustering key, not a mutual-exclusivity guarantee:
+    Kalshi events and (from 9.33) plain multi-market Gamma events share it,
+    cumulative ladders included."""
     conn = db.connect(tmp_path / "lab.db")
-    _seed_leg(conn, "0x1", "evt_bad", "Will CPI be between 3.0% and 3.5%?", 0.5, 0.5, 1.0)
-    _seed_leg(conn, "0x2", "evt_bad", "Will CPI be between 3.5% and 4.0%?", 0.5, 0.5, 1.0)
+    for cid, event_id, venue, neg_risk in (("p0", "neg", "polymarket", 1),
+                                          ("p1", "neg", "polymarket", 1),
+                                          ("q0", "plain", "polymarket", 0),
+                                          ("q1", "plain", "polymarket", 0),
+                                          ("kalshi:k0", "kalshi:E", "kalshi", 0)):
+        db.upsert_market(conn, {
+            "condition_id": cid, "venue": venue, "venue_native_id": cid, "slug": None,
+            "question": f"Will X be above {cid[-1]}?", "category": "economics",
+            "description": "d", "end_date_iso": None, "token_id_yes": None,
+            "token_id_no": None, "neg_risk": neg_risk, "active": 0, "closed": 1,
+            "liquidity_num": 1.0, "volume_num": 1.0, "tier": "liquid", "event_id": event_id,
+        })
     conn.commit()
-
-    assert bucketed_resolved_events(conn, "m_test") == []
-    conn.close()
-
-
-def test_bucketed_resolved_events_skips_group_with_unparseable_question(tmp_path):
-    conn = db.connect(tmp_path / "lab.db")
-    _seed_leg(conn, "0x1", "evt_unclear", "Will the incumbent win?", 0.4, 0.4, 0.0)
-    _seed_leg(conn, "0x2", "evt_unclear", "Will the challenger win?", 0.6, 0.6, 1.0)
-    conn.commit()
-
-    assert bucketed_resolved_events(conn, "m_test") == []
-    conn.close()
-
-
-def test_bucketed_resolved_events_uses_latest_forecast_per_leg(tmp_path):
-    conn = db.connect(tmp_path / "lab.db")
-    _seed_leg(conn, "0x1", "evt2", "Will CPI be between 3.0% and 3.5%?", 0.9, 0.9, 0.0,
-             ts="2026-06-01T00:00:00+00:00")
-    # A later forecast on the same leg -- must win over the earlier one.
-    db.append_forecast(conn, {"ts": "2026-06-15T00:00:00+00:00", "condition_id": "0x1",
-                             "model_id": "m_test", "p_yes": 0.2, "p_market_at_ts": 0.25})
-    _seed_leg(conn, "0x2", "evt2", "Will CPI be between 3.5% and 4.0%?", 0.6, 0.6, 1.0,
-             ts="2026-06-01T00:00:00+00:00")
-    conn.commit()
-
-    events = bucketed_resolved_events(conn, "m_test")
-    assert len(events) == 1
-    assert events[0]["p_model"][0] == pytest.approx(0.2)  # the later forecast, not 0.9
+    assert set(negrisk_legs(conn)) == {"neg"}
+    kalshi_rows = [_row("kalshi:E", 0, 0.5, 0.5, 1.0, venue="kalshi")]
+    assert bucketed_events(kalshi_rows, {"kalshi:E": {"kalshi:E_0": ("q 1", SEEN)}})[0] == []
     conn.close()
 
 
@@ -140,46 +178,19 @@ def test_rps_rewards_correct_shape_over_lucky_spike():
     assert rps(shape_correct, y_bucket_idx) < rps(lucky_spike, y_bucket_idx)
 
 
-def test_paired_rps_skill_reuses_cluster_bootstrap(tmp_path):
+def test_paired_rps_skill_reuses_cluster_bootstrap():
     """Pairing/clustering reuse proven directly (not assumed): paired_rps_skill's
     CI comes from the same cluster_bootstrap_ci every other skill statistic
-    already uses, and bucketed_resolved_events' output feeds it end to end."""
-    conn = db.connect(tmp_path / "lab.db")
-    _seed_leg(conn, "0x1", "evtA", "Will CPI be 3.0%?", 0.05, 0.33, 0.0)
-    _seed_leg(conn, "0x2", "evtA", "Will CPI be 3.5%?", 0.90, 0.34, 1.0)
-    _seed_leg(conn, "0x3", "evtA", "Will CPI be 4.0%?", 0.05, 0.33, 0.0)
-    _seed_leg(conn, "0x4", "evtB", "Will temperature be 60F?", 0.05, 0.33, 0.0)
-    _seed_leg(conn, "0x5", "evtB", "Will temperature be 70F?", 0.90, 0.34, 1.0)
-    _seed_leg(conn, "0x6", "evtB", "Will temperature be 80F?", 0.05, 0.33, 0.0)
-    conn.commit()
-
-    events = bucketed_resolved_events(conn, "m_test")
+    already uses, and bucketed_events' output feeds it end to end."""
+    legs = {**_legs("A", ["Will CPI be 3.0%?", "Will CPI be 3.5%?", "Will CPI be 4.0%?"]),
+            **_legs("B", ["Will it be 60F?", "Will it be 70F?", "Will it be 80F?"])}
+    rows = []
+    for event_id in ("A", "B"):
+        rows += [_row(event_id, 0, 0.05, 0.33, 0.0), _row(event_id, 1, 0.90, 0.34, 1.0),
+                 _row(event_id, 2, 0.05, 0.33, 0.0)]
+    events, _ = bucketed_events(rows, legs)
     assert len(events) == 2
     result = paired_rps_skill(events, iterations=200)
     assert result.n == 2
     assert result.skill_rps > 0  # model clearly beats the near-uniform market
     assert result.skill_rps_ci_lo <= result.skill_rps <= result.skill_rps_ci_hi
-    conn.close()
-
-
-def test_bucketed_resolved_events_filters_by_category_and_window(tmp_path):
-    conn = db.connect(tmp_path / "lab.db")
-    _seed_leg(conn, "0x1", "evt_econ", "Will CPI be 3.0%?", 0.3, 0.3, 0.0,
-             ts="2026-07-01T00:00:00+00:00")
-    _seed_leg(conn, "0x2", "evt_econ", "Will CPI be 3.5%?", 0.7, 0.7, 1.0,
-             ts="2026-07-01T00:00:00+00:00")
-    _seed_leg(conn, "0x3", "evt_weather", "Will it be 60F?", 0.3, 0.3, 0.0,
-             ts="2020-01-01T00:00:00+00:00")
-    _seed_leg(conn, "0x4", "evt_weather", "Will it be 70F?", 0.7, 0.7, 1.0,
-             ts="2020-01-01T00:00:00+00:00")
-    conn.execute("UPDATE markets SET category='weather' WHERE condition_id IN ('0x3','0x4')")
-    conn.execute("UPDATE resolutions SET resolved_ts='2020-01-01T00:00:00+00:00' "
-                "WHERE condition_id IN ('0x3','0x4')")
-    conn.commit()
-
-    econ_only = bucketed_resolved_events(conn, "m_test", category="economics")
-    assert {e["event_id"] for e in econ_only} == {"evt_econ"}
-
-    recent_only = bucketed_resolved_events(conn, "m_test", window_days=90)
-    assert {e["event_id"] for e in recent_only} == {"evt_econ"}  # 2020 event excluded
-    conn.close()

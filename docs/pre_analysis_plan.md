@@ -1528,3 +1528,39 @@ no LLM cost; forward-only, with the cohort re-drawn once on deployment.
 control's scoring, whose membership is read off the ledger. Which markets they cover was decided by
 the coincidence of two seeded draws, neither of which depends on outcomes, so they are valid placebo
 observations — there are simply far fewer of them on Kalshi than 9.26 and 9.34 intended.
+
+**Addendum 9.37 (2026-09-28).** The distributional secondary outcome (RPS, Phase 16) was computed on
+an invalid set of events; every RPS value written before this date is withdrawn, and a statement in
+9.33 about it is corrected. Binary Brier remains the sole primary outcome; nothing about H1–H3
+changes.
+
+**What was wrong.** An event entered RPS when its legs shared a `markets.event_id`, exactly one of
+its *forecast* legs resolved YES, and every leg's question contained a number. Over `m0_market`'s
+full history that admitted 847 events, and each condition failed differently:
+(i) `event_id` is a clustering key, not a mutual-exclusivity guarantee — **276** of the 847 were
+Kalshi events (linked for clustering in August), which include cumulative "above X" ladders whose
+buckets overlap, and 18 were plain multi-market Polymarket events linked from 9.33; only a
+Polymarket negRisk group is mutually exclusive by construction.
+(ii) "Exactly one forecast leg won" selects on the outcome: legs priced outside the forecast bounds
+are never forecast, so an event won by such a leg had no winner among its forecast legs and dropped
+out, while otherwise-identical events won by a forecast leg stayed in.
+(iii) **321** events had the same number in every question — categorical events whose questions
+share a year — and were scored as ordered buckets in arbitrary order.
+Separately, the RPS on each `eval_runs` row was recomputed from all of the model's resolved
+forecasts, ignoring the row's own venue, window, exclusions and horizon stratum.
+
+**The correction to 9.33.** 9.33 stated that RPS "keeps its own guard ... so nested ladders and
+per-person events do not enter it". That was not checked and is false: a ladder in which exactly one
+threshold was crossed passes that guard, as do per-person events with a shared year.
+
+**The rule from this date.** An RPS observation is a Polymarket negRisk event whose every leg (every
+leg the event had at forecast time) was forecast in the same pass, whose legs' questions yield
+distinct numbers, and which has exactly one winning leg; it is scored on its latest complete pass.
+Completeness is decided before the outcome is known, which removes (ii). Events are assembled from
+exactly the rows the row's Brier statistic uses, so RPS inherits its venue, category, window,
+exclusions and the censoring of 9.35.
+
+**What it leaves.** Under this rule, `m0_market`'s whole history holds **22** qualifying events —
+fewer than the report's 20-event floor for any single category. RPS will very likely be reported as
+insufficient data at the freeze, and the paper will say so rather than cite the withdrawn values,
+which remain in `eval_runs` as written.

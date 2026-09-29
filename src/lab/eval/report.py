@@ -134,10 +134,12 @@ the fitted a gets applied at forecast time.</p>
 {% endif %}
 
 <h2>Distributional skill (RPS, secondary)</h2>
-<p class="note">Ranked Probability Score over same-venue negRisk bucketed events (Phase 16) --
+<p class="note">Ranked Probability Score over Polymarket negRisk bucketed events (Phase 16) --
 e.g. CPI ranges, temperature bands scored as one ordered distribution instead of independent
-binary legs. <b>Secondary to the binary Brier table above</b>, which stays the sole primary,
-pre-registered statistic (brief section 7's PAP is unaffected). A row appears here only once a
+binary legs. An event counts only when every leg it had was forecast in the same pass and the
+legs' numbers give a strict order (PAP 9.37); values computed before 2026-09-28 used a different,
+invalid assembly and are withdrawn. <b>Secondary to the binary Brier table above</b>, which stays
+the sole primary, pre-registered statistic. A row appears here only once a
 model/venue/category/window has resolved at least {{ min_bucketed_events }} bucketed events --
 below that, rps stays NULL on the eval_runs row and nothing is shown for it.</p>
 {% if rps_rows %}

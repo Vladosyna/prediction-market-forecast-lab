@@ -302,6 +302,10 @@ def _seed_bucket_event_for_report(conn, event_id, model_id, ts, category="econom
             "active": 0, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
             "tier": "liquid", "event_id": event_id,
         })
+        # Listed before it was forecast, as every market in production is:
+        # a pass is complete only over legs the event had by then (PAP 9.37).
+        conn.execute("UPDATE markets SET first_seen_ts = ? WHERE condition_id = ?",
+                     ("2026-01-01T00:00:00+00:00", cid))
         payout = 1.0 if i == true_idx else 0.0
         db.append_forecast(conn, {
             "ts": ts, "condition_id": cid, "model_id": model_id,

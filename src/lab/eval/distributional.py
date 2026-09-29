@@ -6,22 +6,29 @@ bucket as an isolated binary discards the cross-bucket structure; this
 module assembles the per-model implied distribution over an event's buckets
 so `eval/scoring.py::rps` can score the whole shape at once.
 
-Scope (guardrail 1 -- stated, not silently picked): same-venue negRisk
-groups only, linked at sync time by `collect/universe.py::_link_negrisk_legs`
-into a shared `markets.event_id` (persisted, unlike Gamma's own live-only
-event grouping -- this module reads what was already linked, it never
-re-derives grouping from Gamma). Cross-venue bucket-to-bucket matching is
-out of scope for this pass. RPS requires ORDERED buckets, which this module
-determines by extracting the first numeric value from each leg's question
-text; a leg that doesn't yield a parseable number takes the whole event out
-of RPS scoring (logged, not raised) -- M6's coherence check is unaffected.
+What counts as a bucketed event (rewritten 2026-09-28, PAP 9.37). The first
+version grouped legs by `markets.event_id` and admitted an event when exactly
+one of its FORECAST legs resolved YES and every leg's question held a number.
+Each of those three turned out to be wrong in production:
 
-One RPS observation per event: only the model's LATEST forecast on each leg
-is used (not every historical forecast on that leg), since aligning
-multiple daily forecasts across legs at arbitrary, possibly-differing
-timestamps has no single obviously-correct answer and CLAUDE.md doesn't
-specify one; "latest known distributional view per event" is the simplest
-defensible choice.
+- `event_id` is a clustering key, not a mutual-exclusivity guarantee: Kalshi
+  events (linked for clustering in August) and, from 9.33, every multi-market
+  Gamma event share it -- cumulative "above X" and "by date" ladders included.
+  Only a Polymarket negRisk group is mutually exclusive by construction, so
+  only those are admitted.
+- "Exactly one forecast leg won" selects on the outcome: a leg priced outside
+  the forecast bounds is never forecast, so an event won by such a leg had no
+  winner among its forecast legs and dropped out. The distribution must be
+  COMPLETE instead -- every leg the event had at forecast time, forecast in
+  the same pass -- which is decided before the outcome is known.
+- A number in every question is not an order: categorical events whose
+  questions share a year ("... in 2026?") parsed to one value per leg and
+  were scored in arbitrary order. The parsed values must be distinct.
+
+Events are assembled from exactly the rows a statistic is computed on, so the
+RPS on an eval_runs row has that row's venue, category, window, exclusions and
+censoring rather than its own. One observation per event: its latest complete
+pass. Cross-venue bucket matching remains out of scope.
 """
 
 from __future__ import annotations
@@ -76,73 +83,75 @@ def coherence_deviation(legs_p_yes: list[float]) -> float:
     return abs(float(np.asarray(legs_p_yes, dtype=float).sum()) - 1.0)
 
 
-def bucketed_resolved_events(conn, model_id: str, category: str | None = None,
-                             window_days: int | None = None) -> list[dict[str, Any]]:
-    """Resolved, bucket-ordered events for one model: one row per event_id
-    with >=2 resolved legs, exactly one resolving true, all legs' questions
-    yielding a parseable bucket order. Malformed or unparseable groups are
-    skipped and logged, never coerced. `category`/`window_days` mirror
-    `eval/run.py::resolved_forecast_rows`'s own filters (window_days against
-    `resolved_ts`, since RPS scores already-resolved distributional events --
-    a stated, defensible choice where CLAUDE.md doesn't specify one).
+def negrisk_legs(conn) -> dict[str, dict[str, tuple[str, str]]]:
+    """Every Polymarket negRisk leg the market table knows, as
+    {event_id: {condition_id: (question, first_seen_ts)}}. Loaded once per
+    evaluation run (a few tens of thousands of short rows) rather than per
+    statistic."""
+    legs: dict[str, dict[str, tuple[str, str]]] = {}
+    for r in conn.execute(
+        """SELECT event_id, condition_id, question, first_seen_ts FROM markets
+           WHERE COALESCE(venue, 'polymarket') = 'polymarket' AND neg_risk = 1
+             AND event_id IS NOT NULL"""
+    ):
+        legs.setdefault(r["event_id"], {})[r["condition_id"]] = (
+            r["question"], r["first_seen_ts"] or "")
+    return legs
+
+
+def bucketed_events(rows: list[dict[str, Any]],
+                    legs: dict[str, dict[str, tuple[str, str]]],
+                    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """RPS observations from `rows` (one model's scored rows for one statistic,
+    as `eval/run.py::resolved_forecast_rows` returns them) and the negRisk
+    leg map. Returns (events, skipped-counts by reason) -- the counts go into
+    one log line per statistic, never one per event.
+
+    A pass (the rows sharing one forecast_ts) is complete when it holds every
+    leg the event had by then (`first_seen_ts <= forecast_ts`); an event is
+    scored on its latest complete pass, bucket-ordered by the distinct number
+    in each leg's question, and must have exactly one winning leg.
     """
-    rows = [dict(r) for r in conn.execute(
-        """
-        SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.ts, r.payout_yes, r.resolved_ts,
-               m.event_id AS event_id, m.category AS category, m.question AS question
-        FROM forecasts f
-        JOIN resolutions r ON r.condition_id = f.condition_id
-        JOIN markets m ON m.condition_id = f.condition_id
-        WHERE f.model_id = ? AND r.disputed = 0 AND m.event_id IS NOT NULL
-        ORDER BY f.ts ASC
-        """,
-        (model_id,),
-    )]
-
-    cutoff = None
-    if window_days is not None:
-        from lab.util import now_utc
-        from datetime import timedelta
-        cutoff = (now_utc() - timedelta(days=window_days)).isoformat(timespec="seconds")
-
-    by_event: dict[str, dict[str, dict]] = {}
+    passes: dict[tuple[str, str], dict[str, dict]] = {}
     for r in rows:
-        # ORDER BY f.ts ASC above means the last write per condition_id here
-        # is that leg's latest forecast -- exactly the dedup this module's
-        # docstring states.
-        by_event.setdefault(r["event_id"], {})[r["condition_id"]] = r
+        if (r.get("venue") or "polymarket") != "polymarket" or not r.get("event_id"):
+            continue
+        if r["event_id"] not in legs:
+            continue
+        passes.setdefault((r["event_id"], r["forecast_ts"]), {})[r["condition_id"]] = r
+
+    latest: dict[str, tuple[str, dict[str, dict]]] = {}
+    skipped: dict[str, int] = {}
+    for (event_id, ts), got in passes.items():
+        required = {cid for cid, (_, seen) in legs[event_id].items() if seen <= ts}
+        if not required or not required <= got.keys():
+            continue
+        if event_id not in latest or ts > latest[event_id][0]:
+            latest[event_id] = (ts, {cid: got[cid] for cid in required})
+    incomplete = len({e for e, _ in passes}) - len(latest)
+    if incomplete:
+        skipped["no_complete_pass"] = incomplete
 
     events: list[dict[str, Any]] = []
-    for event_id, legs_by_cid in by_event.items():
-        legs = list(legs_by_cid.values())
-        if len(legs) < 2:
+    for event_id in sorted(latest):
+        _, by_cid = latest[event_id]
+        cids = sorted(by_cid)
+        orders = [parse_bucket_order(legs[event_id][cid][0]) for cid in cids]
+        if any(o is None for o in orders) or len(set(orders)) != len(orders):
+            skipped["unordered"] = skipped.get("unordered", 0) + 1
             continue
-        if category is not None and legs[0]["category"] != category:
+        winners = [cid for cid in cids if by_cid[cid]["payout_yes"] == 1.0]
+        if len(winners) != 1:
+            skipped["not_one_winner"] = skipped.get("not_one_winner", 0) + 1
             continue
-        if cutoff is not None and legs[0]["resolved_ts"] < cutoff:
-            continue
-        true_legs = [l for l in legs if l["payout_yes"] == 1.0]
-        if len(true_legs) != 1:
-            log.warning("distributional: malformed bucketed event skipped (not exactly one "
-                       "leg resolved true)", extra={"ctx": {"event_id": event_id,
-                                                            "model_id": model_id,
-                                                            "n_true": len(true_legs)}})
-            continue
-        orders = [parse_bucket_order(l["question"]) for l in legs]
-        if any(o is None for o in orders):
-            log.info("distributional: unparseable bucket order, event skipped",
-                     extra={"ctx": {"event_id": event_id, "model_id": model_id}})
-            continue
-        order_idx = list(np.argsort(orders))
-        legs_sorted = [legs[i] for i in order_idx]
-        y_bucket_idx = next(i for i, l in enumerate(legs_sorted) if l["payout_yes"] == 1.0)
+        ordered = [cids[i] for i in np.argsort(orders, kind="stable")]
         events.append({
             "event_id": event_id,
-            "category": legs_sorted[0]["category"],
-            "p_model": [l["p_yes"] for l in legs_sorted],
-            "p_market": [l["p_market_at_ts"] for l in legs_sorted],
-            "y_bucket_idx": y_bucket_idx,
-            "condition_ids": [l["condition_id"] for l in legs_sorted],
-            "resolved_ts": legs_sorted[0]["resolved_ts"],
+            "category": by_cid[ordered[0]].get("category"),
+            "p_model": [by_cid[c]["p_yes"] for c in ordered],
+            "p_market": [by_cid[c]["p_market_at_ts"] for c in ordered],
+            "y_bucket_idx": ordered.index(winners[0]),
+            "condition_ids": ordered,
+            "resolved_ts": max(by_cid[c]["resolved_ts"] for c in ordered),
         })
-    return events
+    return events, skipped

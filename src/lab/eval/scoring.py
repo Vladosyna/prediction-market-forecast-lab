@@ -130,7 +130,7 @@ class RpsSkillResult:
 
 
 def paired_rps_skill(events: list[dict], iterations: int = 2000) -> RpsSkillResult:
-    """events: `eval/distributional.py::bucketed_resolved_events`'s output --
+    """events: `eval/distributional.py::bucketed_events`'s output --
     one row per bucketed event, each already its own independent cluster (no
     separate event-clustering step needed here, unlike `paired_skill`'s
     per-forecast rows which need clustering by event_id -- a bucketed event

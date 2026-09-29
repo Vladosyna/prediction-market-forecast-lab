@@ -148,6 +148,10 @@ def _seed_bucket_event(conn, event_id, model_id, ts, category="economics", true_
             "active": 0, "closed": 1, "liquidity_num": 100.0, "volume_num": 100.0,
             "tier": "liquid", "event_id": event_id,
         })
+        # Listed before it was forecast, as every market in production is:
+        # a pass is complete only over legs the event had by then (PAP 9.37).
+        conn.execute("UPDATE markets SET first_seen_ts = ? WHERE condition_id = ?",
+                     ("2026-01-01T00:00:00+00:00", cid))
         payout = 1.0 if i == true_idx else 0.0
         db.append_forecast(conn, {
             "ts": ts, "condition_id": cid, "model_id": model_id,
@@ -604,4 +608,41 @@ def test_the_learning_loop_reads_the_same_censored_sample(config):
     _mk_resolved(conn, "on_time_no", _ago(40), _ago(20), 0.0, end=_ago(20))
     conn.commit()
     assert [r["condition_id"] for r in m1_resolved_rows(conn)] == ["on_time_no"]
+    conn.close()
+
+
+# --- RPS scoped to its own row (2026-09-28, PAP 9.37) -------------------------
+
+def test_rps_is_computed_on_the_rows_of_its_own_statistic(config, monkeypatch):
+    """RPS used to be recomputed for every row from ALL of a model's resolved
+    forecasts -- every venue, every window, no exclusions, no censoring -- so
+    the number beside a confirmatory Polymarket row included pre-registration
+    forecasts and Kalshi events. It must see exactly that row's rows."""
+    monkeypatch.setattr("lab.eval.run.KALSHI_EXCLUSION_WINDOWS", ())
+    conn = db.connect(config["storage"]["db_path"])
+    _seed_bucket_event(conn, "before_start", "m0_market", "2026-07-01T02:00:00+00:00")
+    _seed_bucket_event(conn, "after_start", "m0_market", "2026-08-01T02:00:00+00:00")
+    # a Kalshi group with every property the Polymarket ones have
+    for i, order in enumerate([3.0, 3.5]):
+        cid = f"kalshi:K-{i}"
+        db.upsert_market(conn, {
+            "condition_id": cid, "venue": "kalshi", "venue_native_id": f"K-{i}",
+            "slug": None, "question": f"Will CPI be above {order}%?", "category": "economics",
+            "description": "d", "end_date_iso": "2026-08-10T00:00:00+00:00",
+            "token_id_yes": None, "token_id_no": None, "neg_risk": 1,
+            "active": 0, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
+            "tier": "liquid", "event_id": "kalshi:K",
+        })
+        db.append_forecast(conn, {"ts": "2026-08-01T02:00:00+00:00", "condition_id": cid,
+                                  "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5})
+        db.record_resolution(conn, cid, "2026-08-10T00:00:00+00:00", float(i == 0), False,
+                             "kalshi")
+    conn.commit()
+
+    summaries = run_eval(conn, config)
+    n_events = {(s["venue"], s["window"]): s["n_bucketed_events"] for s in summaries
+                if s["model_id"] == "m0_market" and s["category"] == ALL_CATEGORIES}
+    assert n_events[("polymarket", "all_time")] == 2
+    assert n_events[("polymarket", "confirmatory")] == 1, "the window applies to RPS too"
+    assert n_events[("kalshi", "all_time")] == 0, "only Polymarket negRisk groups are exclusive"
     conn.close()
