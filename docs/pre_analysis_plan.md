@@ -1497,3 +1497,34 @@ production are unchanged; it is recorded as a limitation of M1's prior for the p
 
 **Discontinuity.** `eval_runs` rows from 2026-09-28 apply the rule; earlier rows do not, and the
 `_uncensored` check reproduces them.
+
+**Addendum 9.36 (2026-09-28).** The null control's sample is drawn so that membership is a property
+of each market, not of the pool it was drawn from. Purpose, size and venues are unchanged from 9.34;
+this corrects how the draw is made, because the draw as implemented had stopped Kalshi's control
+from running.
+
+**What was found.** In the three days after 9.34 raised the control to 150 per venue, Kalshi's
+null-control forecasts fell to **56, 7 and 2 markets a day**. The decay was older than 9.34: from
+2026-09-07, the day 9.26 stopped snapshotting unsampled sports markets, Kalshi's daily count ran 28,
+18, 0, 14, 14, 13, 5, 4, 0. The sample was `random.sample` over the currently eligible pool, and
+that draw is a function of the pool's size and order — one market listing or settling re-deals the
+whole sample. Kalshi's pool (44,947 sports markets on 2026-09-28) changes every hour, so the snapshot
+round, which since 9.26 collects only sampled sports markets, and the forecast pass minutes to hours
+later drew different samples, and the forecast pass found its own sample's prices stale. 9.26 stated
+that on Kalshi "the sampling frame after the change is the sampling frame before it"; that held for
+the frame and not for the draw. Polymarket, which snapshots every sports market, was spared the
+staleness, but its cohort was re-dealt daily, so a sampled market was forecast on scattered days
+rather than followed.
+
+**The change.** Each venue's sample is the 150 eligible markets with the smallest
+`sha256("<seed>:<venue>:<condition_id>")` (seed 42, as before). That is a uniform random sample
+without replacement from the eligible pool at any moment, and a market's rank never changes, so the
+sample moves only at its margin — when a market of lower rank lists, or a member leaves the pool —
+instead of being re-dealt. The Kalshi snapshot round collects a sample 25% wider than the control,
+so a market entering at the margin before the forecast pass already has a price. Cheap models only;
+no LLM cost; forward-only, with the cohort re-drawn once on deployment.
+
+**What stays valid.** Null-control rows written before this date remain in the ledger and in the
+control's scoring, whose membership is read off the ledger. Which markets they cover was decided by
+the coincidence of two seeded draws, neither of which depends on outcomes, so they are valid placebo
+observations — there are simply far fewer of them on Kalshi than 9.26 and 9.34 intended.

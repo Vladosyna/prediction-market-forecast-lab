@@ -107,6 +107,53 @@ def test_sample_is_deterministic_for_a_fixed_pool(conn):
     assert null_control_ids(conn, config) == null_control_ids(conn, config)
 
 
+def test_membership_survives_the_pool_changing_around_it(conn):
+    """THE 2026-09-28 regression (PAP 9.36). `random.sample` over the current
+    pool re-dealt the whole sample whenever one market listed or settled, so
+    the Kalshi snapshot round and the forecast pass drew different samples and
+    Kalshi's control fell to 56, 7, 2 markets a day. A member must stay a
+    member while unrelated markets come and go; only the margin may move."""
+    config = load_config()
+    for i in range(3000):
+        _seed_market(conn, f"kalshi:k{i}", venue="kalshi")
+    conn.commit()
+    before = {c for c in null_control_ids(conn, config) if c.startswith("kalshi:")}
+
+    # 40 listings and 40 settlements of non-members, as in any hour.
+    for i in range(3000, 3040):
+        _seed_market(conn, f"kalshi:k{i}", venue="kalshi")
+    gone = [f"kalshi:k{i}" for i in range(3000) if f"kalshi:k{i}" not in before][:40]
+    conn.executemany("UPDATE markets SET closed = 1, active = 0 WHERE condition_id = ?",
+                     [(c,) for c in gone])
+    conn.commit()
+    after = {c for c in null_control_ids(conn, config) if c.startswith("kalshi:")}
+
+    # Each newcomer can displace at most one member; settled non-members none.
+    assert len(before - after) <= 40
+    assert len(before & after) >= len(before) - 40
+    assert len(after) == len(before)
+
+
+def test_the_snapshot_filter_covers_what_the_forecast_pass_will_draw(conn):
+    """Kalshi snapshots only sampled sports markets (9.26); the forecast pass
+    draws minutes to hours later. The snapshot side draws a wider margin so a
+    market entering the sample at its edge already has a price."""
+    from lab.collect.kalshi_collector import NULL_CONTROL_SNAPSHOT_MARGIN
+
+    config = load_config()
+    for i in range(2000):
+        _seed_market(conn, f"kalshi:k{i}", venue="kalshi")
+    conn.commit()
+    snap_side = null_control_ids(conn, config, margin=NULL_CONTROL_SNAPSHOT_MARGIN)
+    # members settle between the snapshot round and the forecast pass
+    members = sorted(c for c in null_control_ids(conn, config) if c.startswith("kalshi:"))
+    conn.executemany("UPDATE markets SET closed = 1, active = 0 WHERE condition_id = ?",
+                     [(c,) for c in members[:20]])
+    conn.commit()
+    forecast_side = null_control_ids(conn, config)
+    assert forecast_side <= snap_side
+
+
 def test_sample_excludes_non_sports(conn):
     config = load_config()
     for i in range(10):

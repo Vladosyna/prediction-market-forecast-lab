@@ -315,6 +315,9 @@ def tracked_kalshi_markets(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+NULL_CONTROL_SNAPSHOT_MARGIN = 0.25
+
+
 def drop_unsampled_sports(conn, config: dict[str, Any],
                           markets: list[dict]) -> tuple[list[dict], int]:
     """Of `markets`, the ones a venue-wide snapshot round should collect:
@@ -371,7 +374,11 @@ def drop_unsampled_sports(conn, config: dict[str, Any],
 
     from lab.forecast import null_control_ids
 
-    sampled = null_control_ids(conn, config)
+    # A quarter wider than the control itself (PAP 9.36). Membership is
+    # stable per market, but it can still move at the sample's margin
+    # between this round and the forecast pass -- a member settles, the next
+    # market by rank moves in -- and that market must already have a price.
+    sampled = null_control_ids(conn, config, margin=NULL_CONTROL_SNAPSHOT_MARGIN)
     kept = [m for m in markets
             if m.get("category") != nc_category or m["condition_id"] in sampled]
     return kept, len(markets) - len(kept)

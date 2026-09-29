@@ -24,6 +24,7 @@ import pytest
 
 from lab.api.kalshi import KalshiMarket
 from lab.collect.kalshi_collector import (
+    NULL_CONTROL_SNAPSHOT_MARGIN,
     assign_kalshi_tier,
     drop_unsampled_sports,
     snapshot_kalshi,
@@ -101,6 +102,10 @@ def test_the_round_snapshots_the_sample_and_no_other_sports(config, conn):
     _seed_universe(conn)
     sampled = null_control_ids(conn, config)
     assert sampled, "fixture must produce a non-empty null-control sample"
+    # The round collects the sample plus its margin (PAP 9.36), so a market
+    # entering the sample at its edge before the forecast pass has a price.
+    collected = null_control_ids(conn, config, margin=NULL_CONTROL_SNAPSHOT_MARGIN)
+    assert sampled <= collected
 
     kalshi = FakeKalshiClient()
     store = SnapshotStore(config["storage"]["snapshots_dir"])
@@ -112,9 +117,9 @@ def test_the_round_snapshots_the_sample_and_no_other_sports(config, conn):
     econ = {r["condition_id"] for r in conn.execute(
         "SELECT condition_id FROM markets WHERE category = 'economics'")}
 
-    assert fetched & sports == sampled, "exactly the sampled sports markets, no more, no fewer"
+    assert fetched & sports == collected, "exactly the sample and its margin, no more, no fewer"
     assert econ <= fetched, "the research population must not lose coverage"
-    assert len(fetched) == len(econ) + len(sampled)
+    assert len(fetched) == len(econ) + len(collected)
 
 
 def test_the_config_flag_restores_the_previous_behaviour(config, conn):
@@ -193,8 +198,8 @@ def test_status_reports_the_working_set_not_just_the_tracked_count(config, conn)
     conn.close()
 
     c2 = db.connect(config["storage"]["db_path"])
-    kalshi_sampled = {cid for cid in null_control_ids(c2, config)
-                      if cid.startswith("kalshi:")}
+    kalshi_sampled = {cid for cid in null_control_ids(
+        c2, config, margin=NULL_CONTROL_SNAPSHOT_MARGIN) if cid.startswith("kalshi:")}
     c2.close()
 
     tail = gather_status(config)["tiers"]["tail"]

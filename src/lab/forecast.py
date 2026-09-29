@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,8 +26,34 @@ from lab.util import now_utc
 log = logging.getLogger(__name__)
 
 
-def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
+def _bottom_k(ids: list[str], k: int, seed: str) -> set[str]:
+    """The k ids with the smallest sha256(seed:id): a uniform random sample
+    without replacement whose membership is a property of each MARKET, not of
+    the pool it was drawn from (PAP 9.36).
+
+    `random.sample` over the current pool was the previous implementation, and
+    its draw is a function of the pool's size and order: one market listing or
+    settling re-deals the whole sample. The pool changes every hour, so the
+    Kalshi snapshot round (which, since 9.26, only collects sampled sports
+    markets) and the forecast pass minutes later drew different samples, and
+    the forecast pass found its sample's prices stale -- Kalshi's control fell
+    to 56, 7 and then 2 markets a day in the three days after 9.34. With
+    bottom-k a market's rank never changes; the sample changes only at its
+    margin, when a lower-ranked market lists or a member leaves the pool.
+    """
+    if k <= 0 or not ids:
+        return set()
+    rank = {cid: hashlib.sha256(f"{seed}:{cid}".encode()).hexdigest() for cid in ids}
+    return set(sorted(ids, key=rank.__getitem__)[:k])
+
+
+def null_control_ids(conn, config: dict[str, Any], margin: float = 0.0) -> set[str]:
     """Seeded sample of *currently forecastable* sports markets (the null control).
+
+    `margin` widens the sample by that fraction for callers that must cover
+    whatever the forecast pass will draw a little later -- the Kalshi snapshot
+    filter -- since bottom-k membership can still move at its margin between
+    the two moments.
 
     The eligibility filter here is load-bearing, and its absence was a silent
     failure of the whole control (found 2026-07-28). This sampled from every
@@ -46,17 +71,16 @@ def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
     """
     nc = config["universe"]["null_control"]
     per_venue = nc.get("sample_size_per_venue")
+    widen = 1.0 + max(0.0, margin)
     if per_venue is None:
         # Legacy pooled draw, for a config written before 2026-09-25.
         rows = conn.execute(
             "SELECT condition_id FROM markets WHERE category = ? "
-            "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0 "
-            "ORDER BY condition_id",
+            "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0",
             (nc["category"],),
         ).fetchall()
-        ids = [r["condition_id"] for r in rows]
-        rng = random.Random(nc["random_seed"])
-        return set(rng.sample(ids, min(nc["sample_size"], len(ids))))
+        return _bottom_k([r["condition_id"] for r in rows],
+                         int(nc["sample_size"] * widen), str(nc["random_seed"]))
     # Per venue (PAP 9.34): a pooled draw let Kalshi's 42k sports listings
     # crowd Polymarket out of its own control. Each venue gets its own seeded
     # draw -- a derived seed per venue, so adding a venue never reshuffles
@@ -66,13 +90,11 @@ def null_control_ids(conn, config: dict[str, Any]) -> set[str]:
         rows = conn.execute(
             "SELECT condition_id FROM markets WHERE category = ? "
             "AND COALESCE(venue, 'polymarket') = ? "
-            "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0 "
-            "ORDER BY condition_id",
+            "AND tier IN ('liquid','tail') AND active = 1 AND closed = 0",
             (nc["category"], venue),
         ).fetchall()
-        ids = [r["condition_id"] for r in rows]
-        rng = random.Random(f"{nc['random_seed']}:{venue}")
-        out |= set(rng.sample(ids, min(int(per_venue[venue]), len(ids))))
+        out |= _bottom_k([r["condition_id"] for r in rows],
+                         int(int(per_venue[venue]) * widen), f"{nc['random_seed']}:{venue}")
     return out
 
 
