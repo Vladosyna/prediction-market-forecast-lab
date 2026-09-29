@@ -148,13 +148,22 @@ class M3Evidence:
     def forecast(self, market: MarketState, context: dict[str, Any]) -> ForecastResult | None:
         if market.condition_id not in self.target_ids:
             return None
-        ts = now_utc_iso()
+        # Evidence is bounded by the timestamp the LEDGER row will carry -- the
+        # pass's frozen moment, passed in as context["ts"] -- not by when
+        # retrieval happens to run (guardrail 11, 2026-09-29). Retrieval runs
+        # minutes into the pass (p50 7, max 29 measured), and bounding at that
+        # later moment let 5 of 44,616 evidence items published after their
+        # row's timestamp reach the aggregation, against a paired market price
+        # that could not have reflected them.
+        ts = context.get("ts") or now_utc_iso()
+        retrieved_ts = now_utc_iso()
         try:
-            articles = gather_news(market.question or "", self.providers)
+            retrieved = gather_news(market.question or "", self.providers)
         except Exception:
             log.exception("m3: news retrieval failed",
                           extra={"ctx": {"condition_id": market.condition_id}})
             return None
+        articles = [a for a in retrieved if not _published_after(a, ts)]
         path_7d = self.price_paths.get(market.condition_id, [])
         try:
             items, usage = extract_evidence(
@@ -170,6 +179,8 @@ class M3Evidence:
                           tau_days=m3cfg["tau_days"], max_shift=m3cfg["max_shift_logodds"])
         dossier = {
             "forecast_ts": ts,
+            "retrieved_ts": retrieved_ts,
+            "articles_after_forecast_ts": len(retrieved) - len(articles),
             "question": market.question,
             "resolution_criteria": market.description,
             "end_date_iso": market.end_date_iso,
@@ -186,7 +197,7 @@ class M3Evidence:
             """INSERT INTO evidence_runs (ts, condition_id, dossier_json, llm_model,
                                           tokens_in, tokens_out, cost_usd)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (ts, market.condition_id, json.dumps(dossier, ensure_ascii=False),
+            (retrieved_ts, market.condition_id, json.dumps(dossier, ensure_ascii=False),
              self.llm.model, usage["tokens_in"], usage["tokens_out"], usage["cost_usd"]),
         )
         is_randomized = market.condition_id in self.randomized_ids
@@ -206,6 +217,23 @@ question, its verbatim resolution criteria, current price, and recent news, stat
 probability that the market resolves YES. Consider base rates, the time remaining, and
 the exact resolution wording. Respond ONLY with JSON: {"p_yes": float, "rationale": str}.
 p_yes must be strictly between 0 and 1. Do not anchor blindly on the market price."""
+
+
+def _published_after(article: Article, ts: str) -> bool:
+    """True when the article is dated after `ts`. Undated articles are kept, as
+    before: the aggregator already gives an undated item zero weight."""
+    if not article.published_ts:
+        return False
+    from datetime import datetime, timezone
+
+    def _utc(value: str) -> datetime:
+        d = datetime.fromisoformat(value)
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+    try:
+        return _utc(article.published_ts) > _utc(ts)
+    except ValueError:
+        return False
 
 
 class M3bDirect:

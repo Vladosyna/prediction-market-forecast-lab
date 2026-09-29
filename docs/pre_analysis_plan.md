@@ -1564,3 +1564,27 @@ exclusions and the censoring of 9.35.
 fewer than the report's 20-event floor for any single category. RPS will very likely be reported as
 insufficient data at the freeze, and the paper will say so rather than cite the withdrawn values,
 which remain in `eval_runs` as written.
+
+**Addendum 9.38 (2026-09-29).** Two forecast-writing rules brought into line with what this plan and
+the brief already state. Neither changes a hypothesis, a statistic or the population; both are
+disclosed because they changed which rows exist.
+
+**(a) M3's evidence is bounded by the row's own timestamp.** Guardrail 11 requires every evidence
+item's `published_ts` to precede the forecast timestamp. The pass freezes one timestamp for every
+row it writes, but M3 retrieves news minutes into the pass (median 7, maximum 29 minutes after the
+frozen time) and bounded evidence at that later moment. Across all 6,956 M3 rows with evidence,
+**6 rows carried one item each published after the row's timestamp** — by 14 seconds to 12
+minutes: forecast ids 651980, 1015211, 1252168, 1290364, 1363154 and 1408752, all
+`m3_evidence@deepseek`. `m3b_direct` reads the same dossier's headlines, so its rows on those
+market-days saw the same articles. The rows remain in the append-only ledger. From this date the
+pass passes its frozen timestamp to M3, articles dated after it are dropped before the LLM sees
+them, and each dossier records the retrieval time and how many articles were dropped.
+
+**(b) "Once per market per day" is a calendar rule.** It was implemented as "at least 24 hours
+since the last forecast", which on a fixed 02:00 cron costs a whole day whenever a pass runs late:
+after the OOM-killed pass of 2026-09-25 was re-run at 03:14, the 02:00 pass on 2026-09-26 found
+those markets 22.8 hours old and did not forecast them — **583 Polymarket markets** went without a
+forecast from any model that day (855 distinct markets against ~1,500). A market is now due when
+the pass falls on a later UTC day than its last forecast, subject to the same six-hour minimum
+spacing the price-move trigger uses (9.5), so a late-evening catch-up and the next morning's pass
+still cannot both write. Normal operation is unchanged.

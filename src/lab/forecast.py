@@ -290,16 +290,33 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
 
 
 def _due(conn, condition_id: str, model_id: str, config: dict[str, Any],
-         price_move_24h: float | None) -> bool:
+         price_move_24h: float | None, now: datetime | None = None) -> bool:
     row = conn.execute(
         "SELECT MAX(ts) AS last_ts FROM forecasts WHERE condition_id = ? AND model_id = ?",
         (condition_id, model_id),
     ).fetchone()
     if row["last_ts"] is None:
         return True
+    now = now or now_utc()
     last = datetime.fromisoformat(row["last_ts"])
-    age_h = (now_utc() - last).total_seconds() / 3600
-    if age_h >= config["forecast"]["cadence_hours"]:
+    age_h = (now - last).total_seconds() / 3600
+    cadence_h = float(config["forecast"]["cadence_hours"])
+    if age_h >= cadence_h:
+        return True
+    min_gap_h = float(config["forecast"].get("price_move_min_hours", 6))
+    # "Once per market per day" is a calendar rule, and a rolling 24 hours is
+    # not one (2026-09-29). With the pass on a fixed 02:00 cron, any pass that
+    # ran late left its markets less than 24 hours old at the next 02:00, and
+    # they skipped a whole day: the 2026-09-25 re-run after an OOM kill wrote
+    # at 03:14, and at 02:00 on 09-26 those 583 Polymarket markets were 22.8
+    # hours old and were not forecast. So a market is due once the pass is on
+    # a later UTC day than its last forecast (enough days later for longer
+    # cadences), subject to the same minimum spacing the price-move trigger
+    # uses -- a late-evening catch-up and the next morning's pass must not
+    # both write within a few hours.
+    days_apart = (now.astimezone(timezone.utc).date()
+                  - last.astimezone(timezone.utc).date()).days
+    if days_apart >= cadence_h / 24 and age_h >= min_gap_h:
         return True
     # The price-move trigger needs its own minimum spacing. It reads a 24-HOUR
     # move, so re-firing on the same move writes the same event repeatedly --
@@ -310,7 +327,6 @@ def _due(conn, condition_id: str, model_id: str, config: dict[str, Any],
     # append-only ledger, but they re-weight the scoring population toward
     # exactly the markets the trigger selects for -- volatile ones. See
     # docs/pre_analysis_plan.md addendum 9.5.
-    min_gap_h = float(config["forecast"].get("price_move_min_hours", 6))
     return (
         price_move_24h is not None
         and age_h >= min_gap_h
@@ -375,6 +391,9 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
     counts = {"eligible_markets": len(states), "written": 0, "abstained": 0, "not_due": 0}
     if ts is None:
         ts = now_utc().isoformat(timespec="seconds")
+    # Due-ness is judged at the pass's own frozen moment, so one pass decides
+    # every market against the same clock however long its LLM calls take.
+    pass_now = datetime.fromisoformat(ts)
     exhausted: set[str] = set()  # models past their daily budget
     for state in states:
         for model in models:
@@ -387,11 +406,11 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
             if model.model_id in exhausted:
                 continue
             if not _due(conn, state.condition_id, model.model_id, config,
-                        moves.get(state.condition_id)):
+                        moves.get(state.condition_id), now=pass_now):
                 counts["not_due"] += 1
                 continue
             try:
-                result = model.forecast(state, {})
+                result = model.forecast(state, {"ts": ts})
             except BudgetExceeded:
                 log.warning("forecast: cost cap hit, disabling model for this run",
                             extra={"ctx": {"model": model.model_id}})

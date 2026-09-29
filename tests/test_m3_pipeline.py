@@ -108,6 +108,43 @@ def test_m3_end_to_end_writes_evidence_and_forecasts(config):
     conn.close()
 
 
+def test_evidence_is_bounded_by_the_ledger_timestamp_not_retrieval_time(config):
+    """Guardrail 11 against the timestamp the ROW carries. The pass freezes one
+    ts for every row; retrieval runs minutes later (p50 7, max 29 measured),
+    and bounding evidence at that later moment let items published after the
+    row's own timestamp into its forecast -- 5 of 44,616 before 2026-09-29."""
+    class TwoArticles:
+        def fetch(self, query, max_items=20):
+            return [Article(title="Before the freeze", url="http://n/before", source="fake",
+                            published_ts="2026-09-26T01:59:00+00:00", summary="."),
+                    Article(title="After the freeze", url="http://n/after", source="fake",
+                            published_ts="2026-09-26T02:10:00+00:00", summary=".")]
+
+    seen: list[str] = []
+
+    class RecordingLlm(FakeLlm):
+        def complete(self, system, prompt, purpose, max_tokens=2000):
+            seen.append(prompt)
+            return super().complete(system, prompt, purpose, max_tokens)
+
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_markets(conn, store, n=1)
+    m3 = M3Evidence(conn, RecordingLlm(), [TwoArticles()], config, ["0x0"])
+    state = MarketState(condition_id="0x0", question="Will X0 happen?", category="politics",
+                        description="d", end_date_iso="2026-12-31T00:00:00+00:00",
+                        tier="liquid", p_market=0.6, spread=0.04,
+                        snapshot_ts="2026-09-26T02:00:00+00:00", days_to_resolution=96.0)
+    result = m3.forecast(state, {"ts": "2026-09-26T02:00:00+00:00"})
+    assert result is not None
+    assert "After the freeze" not in seen[0], "the LLM must never see post-freeze news"
+    dossier = json.loads(conn.execute("SELECT dossier_json FROM evidence_runs").fetchone()[0])
+    assert dossier["forecast_ts"] == "2026-09-26T02:00:00+00:00"
+    assert [a["url"] for a in dossier["articles"]] == ["http://n/before"]
+    assert dossier["articles_after_forecast_ts"] == 1
+    conn.close()
+
+
 def test_m3_evidence_tags_randomized_forecasts(config):
     """M3Evidence.forecast() sets m3_randomized/m3_random_seed on the
     ForecastResult based on membership in randomized_ids, and run_forecasts()

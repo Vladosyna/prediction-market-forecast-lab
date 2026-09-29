@@ -229,50 +229,50 @@ def test_scoring_membership_includes_m6_negrisk_sweep(conn):
 
 # --- the price-move trigger needs its own spacing (2026-08-02..06) ----------
 
+def _due_conn():
+    import tempfile
+    from pathlib import Path
+
+    from lab.store import db
+    return db.connect(Path(tempfile.mkdtemp()) / "lab.db")
+
+
+def _prior(conn, cid, ts):
+    conn.execute("INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
+                  " VALUES (?, ?, 'm0_market', 0.5, 0.5)", (ts, cid))
+    conn.commit()
+
+
+DUE_CONFIG = {"forecast": {"cadence_hours": 24, "price_move_trigger": 0.10,
+                           "price_move_min_hours": 6}}
+
+
 def test_price_move_trigger_cannot_refire_within_its_minimum_spacing():
     """It reads a 24-HOUR move, so without spacing an hourly re-run writes the
     same event over and over. During the crash loop that produced up to 25
     forecasts for one market-day and 54,634 excess rows in five days -- 10% of
     the whole ledger, concentrated on the volatile markets the trigger selects.
     """
-    from datetime import timedelta
+    from datetime import datetime
 
     from lab.forecast import _due
-    from lab.store import db
-    from lab.util import now_utc
 
-    import tempfile
-    from pathlib import Path
-
-    tmp = Path(tempfile.mkdtemp())
-    conn = db.connect(tmp / "lab.db")
+    conn = _due_conn()
+    now = datetime.fromisoformat("2026-09-26T14:00:00+00:00")   # mid-day: no date change
+    big_move = 0.5   # far over the trigger
     try:
-        config = {"forecast": {"cadence_hours": 24, "price_move_trigger": 0.10,
-                               "price_move_min_hours": 6}}
-        big_move = 0.5   # far over the trigger
-
         # No prior forecast -> always due.
-        assert _due(conn, "0x1", "m0_market", config, big_move) is True
-
-        conn.execute(
-            "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
-            " VALUES (?, '0x1', 'm0_market', 0.5, 0.5)",
-            ((now_utc() - timedelta(hours=1)).isoformat(timespec="seconds"),))
-        conn.commit()
+        assert _due(conn, "0x1", "m0_market", DUE_CONFIG, big_move, now=now) is True
+        _prior(conn, "0x1", "2026-09-26T13:00:00+00:00")
         # One hour later, same 24h move: NOT due. This is the whole fix.
-        assert _due(conn, "0x1", "m0_market", config, big_move) is False
-
+        assert _due(conn, "0x1", "m0_market", DUE_CONFIG, big_move, now=now) is False
         # A second market, last forecast past the spacing. (Not a DELETE on the
         # first: the ledger's authorizer forbids it, which is the point of it.)
-        conn.execute(
-            "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
-            " VALUES (?, '0x2', 'm0_market', 0.5, 0.5)",
-            ((now_utc() - timedelta(hours=7)).isoformat(timespec="seconds"),))
-        conn.commit()
+        _prior(conn, "0x2", "2026-09-26T07:00:00+00:00")
         # Past the spacing, a genuine move still earns its extra forecast.
-        assert _due(conn, "0x2", "m0_market", config, big_move) is True
+        assert _due(conn, "0x2", "m0_market", DUE_CONFIG, big_move, now=now) is True
         # ...and a small move still does not.
-        assert _due(conn, "0x2", "m0_market", config, 0.01) is False
+        assert _due(conn, "0x2", "m0_market", DUE_CONFIG, 0.01, now=now) is False
     finally:
         conn.close()
 
@@ -280,27 +280,40 @@ def test_price_move_trigger_cannot_refire_within_its_minimum_spacing():
 def test_daily_cadence_is_unaffected_by_the_spacing_guard():
     """The guard must be inert in normal operation: a market with no price move
     still gets its once-a-day forecast."""
-    from datetime import timedelta
+    from datetime import datetime
 
     from lab.forecast import _due
-    from lab.store import db
-    from lab.util import now_utc
 
-    import tempfile
-    from pathlib import Path
-
-    tmp = Path(tempfile.mkdtemp())
-    conn = db.connect(tmp / "lab.db")
+    conn = _due_conn()
+    now = datetime.fromisoformat("2026-09-27T02:00:00+00:00")
     try:
-        config = {"forecast": {"cadence_hours": 24, "price_move_trigger": 0.10,
-                               "price_move_min_hours": 6}}
-        conn.execute(
-            "INSERT INTO forecasts (ts, condition_id, model_id, p_yes, p_market_at_ts)"
-            " VALUES (?, '0x1', 'm0_market', 0.5, 0.5)",
-            ((now_utc() - timedelta(hours=25)).isoformat(timespec="seconds"),))
-        conn.commit()
-        assert _due(conn, "0x1", "m0_market", config, None) is True
-        assert _due(conn, "0x1", "m0_market", config, 0.0) is True
+        _prior(conn, "0x1", "2026-09-26T01:00:00+00:00")
+        assert _due(conn, "0x1", "m0_market", DUE_CONFIG, None, now=now) is True
+        assert _due(conn, "0x1", "m0_market", DUE_CONFIG, 0.0, now=now) is True
+    finally:
+        conn.close()
+
+
+def test_a_late_pass_does_not_cost_the_next_day():
+    """2026-09-25's re-run after an OOM kill wrote at 03:14; at the 02:00 pass
+    on 09-26 those markets were 22.8 hours old, and under a rolling 24 hours
+    583 Polymarket markets were not forecast that day. Once a day is a
+    calendar rule."""
+    from datetime import datetime
+
+    from lab.forecast import _due
+
+    conn = _due_conn()
+    try:
+        _prior(conn, "late", "2026-09-25T03:14:00+00:00")
+        next_pass = datetime.fromisoformat("2026-09-26T02:00:00+00:00")
+        assert _due(conn, "late", "m0_market", DUE_CONFIG, None, now=next_pass) is True
+        # ...but a re-run later the SAME day still writes nothing new,
+        assert _due(conn, "late", "m0_market", DUE_CONFIG, None,
+                    now=datetime.fromisoformat("2026-09-25T09:00:00+00:00")) is False
+        # and a late-evening catch-up does not double up with the next morning.
+        _prior(conn, "evening", "2026-09-25T23:00:00+00:00")
+        assert _due(conn, "evening", "m0_market", DUE_CONFIG, None, now=next_pass) is False
     finally:
         conn.close()
 
