@@ -165,6 +165,27 @@ def test_backlog_size_counts_the_watchers_real_working_set(conn):
         "closed_one", "past_end_not_closed"}
 
 
+def test_a_market_that_left_the_active_listing_is_checked_before_its_end_date(conn):
+    """The sync lists only active events, so a market that closes early just
+    stops being updated and keeps active=1, closed=0. 10 of 12 such tracked
+    markets sampled on 2026-09-28 were already resolved on Gamma -- one since
+    July, with a December end date -- and the watcher would not have looked
+    until December."""
+    from datetime import timedelta
+
+    from lab.util import now_utc
+
+    _add_market(conn, "vanished", closed=0, end="2099-01-01T00:00:00+00:00")
+    _add_market(conn, "still_listed", closed=0, end="2099-01-01T00:00:00+00:00")
+    stale = (now_utc() - timedelta(hours=30)).isoformat(timespec="seconds")
+    conn.execute("UPDATE markets SET last_synced_ts = ? WHERE condition_id = 'vanished'",
+                 (stale,))
+    conn.commit()
+
+    assert unresolved_closed_markets(conn, limit=10) == ["vanished"]
+    assert resolution_backlog_size(conn) == 1
+
+
 # --- venue resolution time (2026-09-25) ---------------------------------------
 
 def test_venue_timestamps_in_every_observed_format_normalise_to_utc():

@@ -11,12 +11,42 @@ payout, and skipped while the dispute is open. Writes are idempotent
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 from lab.api.gamma import GammaClient, GammaMarket
 from lab.store import db
-from lab.util import now_utc_iso, parse_venue_ts
+from lab.util import now_utc, now_utc_iso, parse_venue_ts
 
 log = logging.getLogger(__name__)
+
+# A market the universe sync has not seen for this long has left Gamma's active
+# listing (2026-09-29). The sync lists only active events and upserts only what
+# it sees, so a market that closes -- most often early, a "by date" market
+# resolving YES -- simply stops being updated and keeps `active=1, closed=0`.
+# The watcher selected on `closed = 1` or a past end date, so such a market was
+# not looked at until its END DATE: measured 2026-09-28, 2,271 Polymarket
+# markets were in that state, and of a random 12 of the tracked ones Gamma
+# reported 10 closed and resolved (one on 2026-07-20 with an end date of
+# 2026-12-31). Their outcomes would have reached the ledger months late, and
+# the snapshot rounds kept requesting their deleted order books every round.
+UNSEEN_BY_SYNC_HOURS = 24
+
+# The watcher's candidate predicate, in ONE place, because every number that
+# reports on the watcher must count what it actually works through (see
+# resolution_backlog_size). Aliases m/r; parameters from candidate_params().
+CANDIDATE_SQL = """
+    r.condition_id IS NULL
+    AND COALESCE(m.venue, 'polymarket') = 'polymarket'
+    AND (m.closed = 1
+         OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?)
+         OR m.last_synced_ts < ?)
+"""
+
+
+def candidate_params(now: datetime | None = None) -> tuple[str, str]:
+    now = now or now_utc()
+    return (now.isoformat(timespec="seconds"),
+            (now - timedelta(hours=UNSEEN_BY_SYNC_HOURS)).isoformat(timespec="seconds"))
 
 
 def unresolved_closed_markets(conn, limit: int = 200) -> list[str]:
@@ -51,16 +81,14 @@ def unresolved_closed_markets(conn, limit: int = 200) -> list[str]:
     while another venue's watcher sat wedged.
     """
     rows = conn.execute(
-        """
+        f"""
         SELECT m.condition_id FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
-        WHERE r.condition_id IS NULL
-          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
-          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        WHERE {CANDIDATE_SQL}
         ORDER BY m.resolution_checked_ts ASC
         LIMIT ?
         """,
-        (now_utc_iso(), limit),
+        (*candidate_params(), limit),
     ).fetchall()
     return [r["condition_id"] for r in rows]
 
@@ -83,14 +111,12 @@ def resolution_backlog_size(conn) -> int:
     draining. Kalshi's own backlog is reported per venue in `lab status`.
     """
     return conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS n FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
-        WHERE r.condition_id IS NULL
-          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
-          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        WHERE {CANDIDATE_SQL}
         """,
-        (now_utc_iso(),),
+        candidate_params(),
     ).fetchone()["n"]
 
 

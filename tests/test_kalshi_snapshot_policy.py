@@ -288,3 +288,28 @@ def test_a_failed_bulk_request_falls_back_to_per_market(config, conn):
     store = SnapshotStore(config["storage"]["snapshots_dir"])
     written = asyncio.run(snapshot_kalshi(client, conn, store, config, tier="tail"))
     assert written == 12 and len(client.single_calls) == 12
+
+
+def test_a_market_the_venue_reports_closed_is_flagged_for_the_watcher(config, conn):
+    """The sync only lists open markets, so an early-closed Kalshi market kept
+    active=1, closed=0 and the watcher would not look at it until its
+    scheduled close. The round already holds each market's status: a market no
+    longer trading is flagged closed there, at no extra request (2026-09-29)."""
+    from lab.collect.kalshi_collector import unresolved_kalshi_markets
+
+    class ClosingClient(FakeKalshiClient):
+        async def market(self, ticker):
+            m = await super().market(ticker)
+            return m.model_copy(update={"status": "determined"}) if ticker.endswith("T0") else m
+
+    _seed(conn, "KXCPI-26SEP-T0", "economics")
+    _seed(conn, "KXCPI-26SEP-T1", "economics")
+    conn.commit()
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    asyncio.run(snapshot_kalshi(ClosingClient(), conn, store, config, tier="tail"))
+
+    flags = {r["condition_id"]: (r["active"], r["closed"]) for r in conn.execute(
+        "SELECT condition_id, active, closed FROM markets")}
+    assert flags["kalshi:KXCPI-26SEP-T0"] == (0, 1)
+    assert flags["kalshi:KXCPI-26SEP-T1"] == (1, 0)
+    assert [m["condition_id"] for m in unresolved_kalshi_markets(conn)] == ["kalshi:KXCPI-26SEP-T0"]

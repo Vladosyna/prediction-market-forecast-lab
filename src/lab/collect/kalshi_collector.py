@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from lab.api.kalshi import KalshiClient, KalshiMarket
 from lab.collect.categories import load_categories
@@ -44,6 +44,8 @@ log = logging.getLogger(__name__)
 
 _OPEN_STATUSES = ("active", "initialized")
 _CLOSED_STATUSES = ("finalized", "closed")
+# Statuses in which trading is over, whether or not the outcome is final yet.
+_TRADING_OVER_STATUSES = ("closed", "determined", "disputed", "amended", "finalized")
 
 
 def assign_kalshi_tier(m: KalshiMarket, config: dict[str, Any],
@@ -459,7 +461,9 @@ async def _prefetch_markets(kalshi, tickers: list[str], sem: asyncio.Semaphore
 
 async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
                                  markets: list[dict], ts_bucket: str,
-                                 depth_levels: int = 0, concurrency: int = 1) -> int:
+                                 depth_levels: int = 0, concurrency: int = 1,
+                                 on_trading_over: Callable[[list[str]], Any] | None = None,
+                                 ) -> int:
     """Snapshot an explicit set of Kalshi markets. Shared by snapshot_kalshi
     (every open Kalshi market) and Phase 17 item 3's per-confirmed-pair
     high-frequency job (a small, explicit condition_id list).
@@ -481,6 +485,7 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
     """
     sem = asyncio.Semaphore(max(1, concurrency))
     prefetched = await _prefetch_markets(kalshi, [r["venue_native_id"] for r in markets], sem)
+    over: list[str] = []
 
     async def _one(row: dict) -> dict | None:
         ticker = row["venue_native_id"]
@@ -497,6 +502,8 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
                     log.warning("kalshi snapshot: market fetch failed",
                                 extra={"ctx": {"condition_id": row["condition_id"]}})
                     return None
+        if m is not None and m.status in _TRADING_OVER_STATUSES:
+            over.append(row["condition_id"])
         if m is None or m.yes_price is None:
             return None
         spread = None
@@ -542,6 +549,8 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
         }
 
     rows = [r for r in await asyncio.gather(*(_one(m) for m in markets)) if r is not None]
+    if over and on_trading_over is not None:
+        on_trading_over(over)
     return store.append(rows)
 
 
@@ -580,13 +589,37 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore,
     depth_levels = config["collect"].get("book_depth_levels", 10) if tier == "liquid" else 0
     written = await snapshot_kalshi_markets(
         kalshi, store, markets, ts_bucket, depth_levels=depth_levels,
-        concurrency=config["venues"]["kalshi"].get("snapshot_concurrency", 1))
+        concurrency=config["venues"]["kalshi"].get("snapshot_concurrency", 1),
+        on_trading_over=lambda ids: mark_trading_over(conn, ids))
     log.info("kalshi snapshot round done",
              extra={"ctx": {"tier": tier, "markets": len(markets),
                             "unsampled_sports_skipped": dropped,
                             "with_depth": len(markets) if depth_levels else 0,
                             "written": written}})
     return written
+
+
+def mark_trading_over(conn, condition_ids: list[str]) -> int:
+    """Flag markets the venue reports as no longer trading (2026-09-29).
+
+    The universe sync fetches `status=open` markets only, so a Kalshi market
+    that closes before its close_time -- an early determination -- is never
+    updated and keeps `active=1, closed=0`; the resolution watcher selects on
+    `closed = 1` or a past end date, so it would not be looked at until the
+    date it was originally scheduled to close. The snapshot rounds already
+    fetch every tracked market's object, status included, so recording the
+    status costs no request. Returns how many rows changed."""
+    if not condition_ids:
+        return 0
+    cur = conn.executemany(
+        "UPDATE markets SET closed = 1, active = 0 WHERE condition_id = ? AND closed = 0",
+        [(cid,) for cid in condition_ids],
+    )
+    conn.commit()
+    if cur.rowcount:
+        log.info("kalshi: markets no longer trading flagged closed",
+                 extra={"ctx": {"count": cur.rowcount}})
+    return cur.rowcount
 
 
 def unresolved_kalshi_markets(conn, limit: int = 200) -> list[dict]:

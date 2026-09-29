@@ -400,27 +400,23 @@ def gather_status(config: dict[str, Any]) -> dict[str, Any]:
     # `oldest_check_age_h` is the direct stall signal: with the round-robin
     # cursor it should stay near one full sweep, and grow without bound if the
     # watcher ever wedges again.
-    from lab.collect.resolutions import resolution_backlog_size
+    from lab.collect.resolutions import CANDIDATE_SQL, candidate_params, resolution_backlog_size
 
     oldest = conn.execute(
-        """
+        f"""
         SELECT MIN(m.resolution_checked_ts) AS t FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
-        WHERE r.condition_id IS NULL AND m.resolution_checked_ts IS NOT NULL
-          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
-          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        WHERE m.resolution_checked_ts IS NOT NULL AND {CANDIDATE_SQL}
         """,
-        (now.isoformat(timespec="seconds"),),
+        candidate_params(now),
     ).fetchone()["t"]
     unchecked = conn.execute(
-        """
+        f"""
         SELECT COUNT(*) AS n FROM markets m
         LEFT JOIN resolutions r ON r.condition_id = m.condition_id
-        WHERE r.condition_id IS NULL AND m.resolution_checked_ts IS NULL
-          AND COALESCE(m.venue, 'polymarket') = 'polymarket'
-          AND (m.closed = 1 OR (m.end_date_iso IS NOT NULL AND m.end_date_iso < ?))
+        WHERE m.resolution_checked_ts IS NULL AND {CANDIDATE_SQL}
         """,
-        (now.isoformat(timespec="seconds"),),
+        candidate_params(now),
     ).fetchone()["n"]
     # Infra invariant, not a data one -- but it belongs on the same screen,
     # because the failure it catches presents as a data outage (see
