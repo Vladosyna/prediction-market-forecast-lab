@@ -10,7 +10,7 @@ OWN separate Windows Scheduled Task (see install-pmxt-scan-task.ps1), and
 only ever calls Router's read-only search/matching methods -- never
 create_order, cancel_order, or fetch_balance.
 
-Run with:  uv run --with pmxt python scripts/pmxt_router_scan.py
+Run with:  uv run --with pmxt python scripts/pmxt_router_scan.py [--full]
 `uv run --with` installs pmxt into an ephemeral/cached environment for this
 one invocation only -- pyproject.toml is never touched, so pmxt never
 becomes part of this project's own declared dependency tree (the concern
@@ -24,14 +24,25 @@ lab.models.m7_crossvenue.verify_pmxt_candidates, which is the only code
 path that ever writes into data/markets_map.yaml -- nothing here is
 auto-confirmed; a human still runs `lab map confirm`.
 
+What it reads (2026-09-30): every Polymarket<->Kalshi "identity" cluster pmxt
+holds, page by page, rather than the ~20 short keyword searches it used to
+run at 20 clusters each. Those searches were a workaround for pmxt ignoring
+descriptive phrases; with the watermark below they also meant a cluster was
+seen once and never again, and new confirmed pairs fell from 123 in July to
+21 in September while Kalshi's universe grew from ~285 to 1,317 live series.
+Only pairs whose Polymarket leg is in this lab's own open, snapshotted
+universe in a priority category become candidates -- the markets M7 can
+actually forecast; the rest would cost an LLM check and a human review for a
+pair nothing could use.
+
 Two independent ways this script avoids re-spending pmxt API calls (and
 downstream LLM verification calls) on pairs already handled: (1)
 data/pmxt_scan_state.json tracks the timestamp of the last successful scan
-and passes it as `updated_since` on every call, so pmxt itself only returns
-clusters it has touched since then; (2) candidates already present in
-data/markets_map.yaml's `confirmed` or `proposed` lists are filtered out
-before being written to the output file at all, regardless of what pmxt
-returns.
+and passes it as `updated_since`, so pmxt itself only returns clusters it has
+touched since then (`--full` ignores it for a one-off complete pass); (2)
+candidates already present in data/markets_map.yaml's `confirmed` or
+`proposed` lists are filtered out before being written to the output file at
+all, regardless of what pmxt returns.
 
 NOTE ON FIELD NAMES: pmxt's exact Router response schema (attribute names on
 its Market/Cluster objects) was assembled from partial public docs and could
@@ -45,8 +56,10 @@ rather than silently write wrong or empty candidates.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
@@ -59,7 +72,6 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(REPO_ROOT / ".env")
 
-from lab.collect.categories import load_categories  # noqa: E402
 from lab.models.m7_crossvenue import load_markets_map  # noqa: E402
 from lab.util import load_config  # noqa: E402
 
@@ -111,38 +123,47 @@ def _attr(obj, *names, default=None):
     return default
 
 
-def _query_terms(config: dict) -> list[str]:
-    """Priority-category keywords, not a blind crawl of pmxt's whole catalog
-    -- keeps each scan scoped and cheap, mirroring propose_matches' own
-    priority-category scoping on the LLM side."""
-    taxonomy = load_categories()
+PAGE_SIZE = 100
+# 10,000 clusters: a bound on a runaway crawl, far above the Polymarket<->Kalshi
+# identity clusters pmxt returned on 2026-09-30.
+MAX_PAGES = 100
+
+
+def _usable_polymarket_ids(config: dict) -> set[str]:
+    """Polymarket markets M7 can forecast: open, in a snapshotted tier, in a
+    priority category (Phase 9: "priority categories only"). Read-only."""
     priority = set(config["universe"]["priority_categories"])
-    terms = sorted({v for v in taxonomy.get("kalshi_series", {}).values() if v in priority})
-    # Tuned 2026-07-28 against a real diagnostic sweep, replacing the original
-    # speculative phrases this comment used to ask someone to revisit. Measured
-    # with no updated_since filter, so the counts are the honest ceiling:
-    #
-    #   'fed rate decision'    0     'inflation'  1     'CPI'   1
-    #   'cpi inflation report' 0     'snow'       1
-    #   'gdp growth'           0     'presidential election'   20
-    #   'temperature record'   0
-    #   'hurricane landfall'   0
-    #
-    # Eleven of the twelve original phrases returned nothing at all. pmxt's
-    # search responds to short topical terms, not descriptive phrases -- 'CPI'
-    # matches where 'cpi inflation report' does not. Keep entries here SHORT;
-    # a phrase that reads well to a human is the failure mode.
-    seed_queries = {
-        "economics": ["inflation", "CPI", "GDP", "fed", "rates", "jobs"],
-        "weather": ["snow", "temperature", "hurricane", "rain"],
-        "politics": ["presidential election", "senate", "governor", "election"],
-        "geopolitics": ["ceasefire", "war", "sanctions"],
-        "entertainment": ["oscars", "grammys", "box office"],
-    }
-    queries: list[str] = []
-    for cat in terms:
-        queries.extend(seed_queries.get(cat, [cat]))
-    return queries
+    db_path = REPO_ROOT / config["storage"]["db_path"]
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return {cid for cid, category in conn.execute(
+            "SELECT condition_id, category FROM markets "
+            "WHERE COALESCE(venue, 'polymarket') = 'polymarket' AND active = 1 AND closed = 0 "
+            "AND tier IN ('liquid', 'tail')") if category in priority}
+    finally:
+        conn.close()
+
+
+def _crawl(router, updated_since: str | None):
+    """Every Polymarket<->Kalshi identity cluster, a page at a time.
+    Yields clusters; returns True only if the crawl reached its end."""
+    for page in range(MAX_PAGES):
+        if page:
+            # Polite pacing (brief guardrail 4, extended to pmxt's own API):
+            # back-to-back calls produced empty-body failures in first-run
+            # testing, consistent with a rate limit on pmxt's side.
+            time.sleep(1.5)
+        kwargs = {"relation": "identity", "venues": "polymarket,kalshi", "min_venues": 2,
+                  "min_confidence": 0.5, "limit": PAGE_SIZE, "offset": page * PAGE_SIZE}
+        if updated_since:
+            kwargs["updated_since"] = updated_since
+        batch = router.fetch_matched_market_clusters(**kwargs)
+        print(f"page {page}: {len(batch)} cluster(s)")
+        yield from batch
+        if len(batch) < PAGE_SIZE:
+            return True
+    print(f"stopped at MAX_PAGES={MAX_PAGES}; the next scan continues from the watermark")
+    return False
 
 
 def _dump(obj) -> str:
@@ -157,6 +178,10 @@ def _dump(obj) -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--full", action="store_true",
+                        help="ignore the watermark: re-read every identity cluster pmxt holds")
+    args = parser.parse_args()
     api_key = os.environ.get("PMXT_API_KEY", "").strip()
     if not api_key:
         print("PMXT_API_KEY not set in .env -- nothing to do.")
@@ -168,7 +193,8 @@ def main() -> None:
     router = pmxt.Router(pmxt_api_key=api_key)
 
     known_pairs = _known_pairs()
-    last_scan_ts = _load_last_scan_ts()
+    usable = _usable_polymarket_ids(config)
+    last_scan_ts = None if args.full else _load_last_scan_ts()
     if last_scan_ts:
         print(f"updated_since={last_scan_ts} ({len(known_pairs)} pair(s) already known, will be skipped)")
     else:
@@ -183,121 +209,104 @@ def main() -> None:
     # distinguishable from "the schema guesses are all wrong and everything
     # got silently filtered out before ever reaching a schema-mismatch check".
     total_clusters = 0
+    skipped_outside_universe = 0
     dumped_cluster_sample = False
     dumped_poly_kalshi_pair = False
 
-    for i, query in enumerate(_query_terms(config)):
-        if i > 0:
-            # Polite pacing (brief guardrail 4, extended to pmxt's own API):
-            # firing every query back-to-back with zero delay produced
-            # empty-body ("Expecting value: line 1 column 1") failures on
-            # roughly half the queries in first-run testing, interleaved with
-            # queries that succeeded normally -- consistent with a rate limit
-            # on pmxt's side rather than a schema problem.
-            time.sleep(1.5)
+    complete = False
+    crawl = _crawl(router, last_scan_ts)
+    while True:
         try:
-            # Per docs.pmxt.dev/api-reference/getV0Matched-market-clusters:
-            # fetch_matched_market_clusters takes its OWN query/venues/
-            # relation/min_confidence filters directly -- no need for a
-            # separate fetch_markets() call first. relation="identity"
-            # (same resolution criteria) is actually the endpoint's own
-            # default, passed explicitly here for clarity. venues= restricts
-            # server-side to just the two venues M7 cares about.
-            kwargs = {"query": query, "relation": "identity", "venues": "polymarket,kalshi",
-                     "min_confidence": 0.5, "limit": 20}
-            if last_scan_ts:
-                # Only clusters pmxt has touched since our last successful
-                # scan -- an already-known, unchanged match won't come back
-                # at all, so we stop re-spending API calls (and downstream
-                # LLM re-verification) on the same pairs every run.
-                kwargs["updated_since"] = last_scan_ts
-            clusters = router.fetch_matched_market_clusters(**kwargs)
-        except Exception as exc:  # noqa: BLE001 -- log and keep scanning other queries
-            print(f"fetch_matched_market_clusters(query={query!r}) failed: {exc}")
+            cluster = next(crawl)
+        except StopIteration as done:
+            complete = bool(done.value)
+            break
+        except Exception as exc:  # noqa: BLE001 -- keep what was read, keep the old watermark
+            print(f"fetch_matched_market_clusters failed mid-crawl: {exc}")
+            break
+        total_clusters += 1
+        if not dumped_cluster_sample:
+            print(f"sample cluster object (first one seen): {_dump(cluster)}")
+            dumped_cluster_sample = True
+        confidence = _attr(cluster, "confidence", "score", default=0.0)
+        cluster_markets = _attr(cluster, "markets", default=[]) or []
+
+        poly = next((mkt for mkt in cluster_markets
+                    if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "polymarket"),
+                   None)
+        kalshi = next((mkt for mkt in cluster_markets
+                      if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "kalshi"),
+                     None)
+        if poly is None or kalshi is None:
+            continue  # cluster matched, but not a Polymarket<->Kalshi pair
+
+        if not dumped_poly_kalshi_pair:
+            # Print unconditionally, not just on a None-mismatch: contract_address
+            # is CONFIRMED as Polymarket's conditionId, but NOT confirmed as
+            # Kalshi's ticker -- the MarketOutcome schema separately documents
+            # "Market Ticker for Kalshi" living on outcome_id, one level down,
+            # which may mean the market-level ticker is elsewhere entirely
+            # (slug? source_metadata?). Seeing the real values side by side is
+            # the only way to resolve this rather than guessing again.
+            print(f"first Polymarket<->Kalshi pair found -- poly={_dump(poly)}")
+            print(f"                                          kalshi={_dump(kalshi)}")
+            dumped_poly_kalshi_pair = True
+
+        # Both confirmed from a real run's raw dump: contract_address is
+        # Polymarket's conditionId (e.g. '0xe017...'); Kalshi objects
+        # leave contract_address None entirely, but populate `slug` with
+        # the real venue ticker (e.g. 'KXPRESPERSON-28-NHAL') -- Polymarket's
+        # own `slug` is a URL slug, not useful, so this priority order is
+        # deliberately different per venue rather than one shared list.
+        poly_condition_id = _attr(poly, "contract_address", "market_id")
+        poly_question = _attr(poly, "title", "question", "name")
+        kalshi_ticker = _attr(kalshi, "slug", "contract_address", "market_id")
+        kalshi_title = _attr(kalshi, "title", "question", "name", default="")
+        if poly_condition_id is None or poly_question is None or kalshi_ticker is None:
+            print(f"pmxt schema mismatch on a cluster market object: "
+                 f"poly={_dump(poly)} kalshi={_dump(kalshi)}")
             continue
 
-        print(f"query={query!r}: {len(clusters)} cluster(s) returned")
-        total_clusters += len(clusters)
+        key = (str(poly_condition_id), str(kalshi_ticker))
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        if key[0] not in usable:
+            skipped_outside_universe += 1
+            continue
+        if key in known_pairs:
+            # Already confirmed or already sitting in `proposed` (from
+            # pmxt or the LLM path) -- skip so the candidates file, and
+            # the LLM verification pass that consumes it, both stay
+            # focused on genuinely new suggestions.
+            skipped_known += 1
+            continue
+        # Kalshi's market-level `title` is the broad EVENT question
+        # ("Who will win the next presidential election?"); the outcome it
+        # actually resolves on lives in the ticker suffix and the outcome
+        # labels ("Nikki Haley" / "Not Nikki Haley"). Sending the title
+        # alone made the downstream LLM check reject every candidate it
+        # ever saw -- correctly, on the evidence it was given (2026-07-28).
+        kalshi_outcomes = [
+            lbl for lbl in (
+                _attr(o, "label", "name", "title")
+                for o in (_attr(kalshi, "outcomes", default=[]) or [])
+            ) if lbl
+        ]
+        candidates.append({
+            "poly_condition_id": str(poly_condition_id),
+            "poly_question": poly_question,
+            "kalshi_ticker": str(kalshi_ticker),
+            "kalshi_title": kalshi_title,
+            "kalshi_outcomes": kalshi_outcomes,
+            "kalshi_description": _attr(kalshi, "description", default=None),
+            "relation_type": "identity",
+            "confidence": float(confidence),
+            "scanned_ts": now_iso,
+        })
 
-        for cluster in clusters:
-            if not dumped_cluster_sample:
-                print(f"sample cluster object (first one seen): {_dump(cluster)}")
-                dumped_cluster_sample = True
-            confidence = _attr(cluster, "confidence", "score", default=0.0)
-            cluster_markets = _attr(cluster, "markets", default=[]) or []
-
-            poly = next((mkt for mkt in cluster_markets
-                        if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "polymarket"),
-                       None)
-            kalshi = next((mkt for mkt in cluster_markets
-                          if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "kalshi"),
-                         None)
-            if poly is None or kalshi is None:
-                continue  # cluster matched, but not a Polymarket<->Kalshi pair
-
-            if not dumped_poly_kalshi_pair:
-                # Print unconditionally, not just on a None-mismatch: contract_address
-                # is CONFIRMED as Polymarket's conditionId, but NOT confirmed as
-                # Kalshi's ticker -- the MarketOutcome schema separately documents
-                # "Market Ticker for Kalshi" living on outcome_id, one level down,
-                # which may mean the market-level ticker is elsewhere entirely
-                # (slug? source_metadata?). Seeing the real values side by side is
-                # the only way to resolve this rather than guessing again.
-                print(f"first Polymarket<->Kalshi pair found -- poly={_dump(poly)}")
-                print(f"                                          kalshi={_dump(kalshi)}")
-                dumped_poly_kalshi_pair = True
-
-            # Both confirmed from a real run's raw dump: contract_address is
-            # Polymarket's conditionId (e.g. '0xe017...'); Kalshi objects
-            # leave contract_address None entirely, but populate `slug` with
-            # the real venue ticker (e.g. 'KXPRESPERSON-28-NHAL') -- Polymarket's
-            # own `slug` is a URL slug, not useful, so this priority order is
-            # deliberately different per venue rather than one shared list.
-            poly_condition_id = _attr(poly, "contract_address", "market_id")
-            poly_question = _attr(poly, "title", "question", "name")
-            kalshi_ticker = _attr(kalshi, "slug", "contract_address", "market_id")
-            kalshi_title = _attr(kalshi, "title", "question", "name", default="")
-            if poly_condition_id is None or poly_question is None or kalshi_ticker is None:
-                print(f"pmxt schema mismatch on a cluster market object: "
-                     f"poly={_dump(poly)} kalshi={_dump(kalshi)}")
-                continue
-
-            key = (str(poly_condition_id), str(kalshi_ticker))
-            if key in seen_pairs:
-                continue
-            seen_pairs.add(key)
-            if key in known_pairs:
-                # Already confirmed or already sitting in `proposed` (from
-                # pmxt or the LLM path) -- skip so the candidates file, and
-                # the LLM verification pass that consumes it, both stay
-                # focused on genuinely new suggestions.
-                skipped_known += 1
-                continue
-            # Kalshi's market-level `title` is the broad EVENT question
-            # ("Who will win the next presidential election?"); the outcome it
-            # actually resolves on lives in the ticker suffix and the outcome
-            # labels ("Nikki Haley" / "Not Nikki Haley"). Sending the title
-            # alone made the downstream LLM check reject every candidate it
-            # ever saw -- correctly, on the evidence it was given (2026-07-28).
-            kalshi_outcomes = [
-                lbl for lbl in (
-                    _attr(o, "label", "name", "title")
-                    for o in (_attr(kalshi, "outcomes", default=[]) or [])
-                ) if lbl
-            ]
-            candidates.append({
-                "poly_condition_id": str(poly_condition_id),
-                "poly_question": poly_question,
-                "kalshi_ticker": str(kalshi_ticker),
-                "kalshi_title": kalshi_title,
-                "kalshi_outcomes": kalshi_outcomes,
-                "kalshi_description": _attr(kalshi, "description", default=None),
-                "relation_type": "identity",
-                "confidence": float(confidence),
-                "scanned_ts": now_iso,
-            })
-
-    print(f"diagnostics: total_clusters_seen={total_clusters} skipped_already_known={skipped_known}")
+    print(f"diagnostics: total_clusters_seen={total_clusters} skipped_already_known={skipped_known} "
+          f"skipped_outside_universe={skipped_outside_universe} usable_polymarket={len(usable)}")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(candidates, indent=2), encoding="utf-8")
@@ -306,7 +315,10 @@ def main() -> None:
     # Only advance the watermark after a fully successful pass -- if this run
     # crashed partway through, the next run should still see everything from
     # last_scan_ts onward rather than silently skipping whatever it missed.
-    _save_last_scan_ts(now_iso)
+    if complete:
+        _save_last_scan_ts(now_iso)
+    else:
+        print("crawl incomplete -- watermark left where it was")
 
 
 if __name__ == "__main__":
