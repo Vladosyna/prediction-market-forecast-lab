@@ -113,6 +113,30 @@ def restore_from_mirror(results_dir: Path, db_path: Path) -> dict[str, Any]:
             report["rows"][name] = n
         conn.commit()
 
+        # Markets first forecast after the last weekly dump (2026-09-30): each
+        # closed day's file describes the markets that day's forecasts
+        # introduced. The weekly dump is newer for everything it contains, so
+        # it wins and these only fill in what it lacks.
+        daily_dir = results_dir / "reference" / "markets_daily"
+        daily_manifest = {}
+        if (daily_dir / "manifest.jsonl").exists():
+            with open(daily_dir / "manifest.jsonl", encoding="utf-8") as fh:
+                for line in fh:
+                    r = json.loads(line)
+                    daily_manifest[r["date"]] = r
+        allowed = set(_columns(conn, "markets"))
+        added = 0
+        for path in sorted(daily_dir.glob("*.jsonl.gz")) if daily_dir.exists() else []:
+            day = path.name[: len("2026-01-01")]
+            record = daily_manifest.get(day)
+            if record is not None and _sha256(path) != record["sha256"]:
+                report["digest_mismatch"].append({"table": "markets_daily", "date": day})
+            rows = [r for r in _rows(path) if not conn.execute(
+                "SELECT 1 FROM markets WHERE condition_id = ?", (r["condition_id"],)).fetchone()]
+            added += _insert(conn, "markets", rows, allowed)
+        conn.commit()
+        report["rows"]["markets_daily"] = added
+
         known_markets = {r[0] for r in conn.execute("SELECT condition_id FROM markets")}
         for table in LEDGER_ORDER:
             allowed = set(_columns(conn, table))

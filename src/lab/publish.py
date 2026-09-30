@@ -369,6 +369,68 @@ REFERENCE_MARKET_COLUMNS = (
 )
 
 
+def sync_market_increment(results_dir: Path, conn: sqlite3.Connection,
+                          max_days: int = 7) -> dict[str, int]:
+    """One gzipped JSONL per closed UTC day of the markets FIRST forecast that
+    day, with the reference columns as they stood when it was written
+    (2026-09-30).
+
+    The restore drill of 2026-09-30 found the gap this closes. The full
+    reference dump is weekly, so a forecast on a market listed since the last
+    dump came back from the mirror as a row nobody could read -- no venue, no
+    category, no end date -- and every statistic silently left it out: 2,616
+    such markets, and 222 of their resolutions, three days after the weekly
+    dump. The ledger's recovery point is one day; what its rows MEAN had a
+    recovery point of seven. These files are small, written once and never
+    rewritten, like the ledger's own; the weekly dump still carries the later
+    state of every market (tier, closure, event links), and a restore prefers it.
+
+    Same shape as sync_ledger_increment: stateless (the files are the record of
+    what is done), closed days only, newest first and bounded, one manifest
+    line per file.
+    """
+    today = now_utc().date().isoformat()
+    out_dir = results_dir / "reference" / "markets_daily"
+    have = {p.name[: len(today)] for p in out_dir.glob("*.jsonl.gz")} if out_dir.exists() else set()
+    first_day: dict[str, list[str]] = {}
+    for cid, day in conn.execute(
+        "SELECT condition_id, substr(MIN(ts), 1, 10) FROM forecasts GROUP BY condition_id"
+    ):
+        if day < today and day not in have:
+            first_day.setdefault(day, []).append(cid)
+    pending = sorted(first_day, reverse=True)[:max_days]
+    if not pending:
+        return {}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, int] = {}
+    for day in pending:
+        ids = sorted(first_day[day])
+        rows = []
+        for i in range(0, len(ids), 500):
+            part = ids[i:i + 500]
+            rows += conn.execute(
+                f"SELECT {', '.join(REFERENCE_MARKET_COLUMNS)} FROM markets "
+                f"WHERE condition_id IN ({','.join('?' * len(part))}) ORDER BY condition_id",
+                part,
+            ).fetchall()
+        tmp = out_dir / f"{day}.jsonl.gz.tmp"
+        with open(tmp, "wb") as raw, gzip.GzipFile(
+                filename=f"{day}.jsonl", mode="wb", fileobj=raw, mtime=0) as gz:
+            for row in rows:
+                gz.write((json.dumps(dict(row), sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False) + "\n").encode("utf-8"))
+        final = out_dir / f"{day}.jsonl.gz"
+        tmp.replace(final)
+        digest = hashlib.sha256(final.read_bytes()).hexdigest()
+        with open(out_dir / "manifest.jsonl", "a", encoding="utf-8") as mf:
+            mf.write(json.dumps({"date": day, "rows": len(rows), "sha256": digest,
+                                 "written_ts": now_utc_iso()},
+                                separators=(",", ":"), sort_keys=True) + "\n")
+        written[day] = len(rows)
+    log.info("market increment mirrored", extra={"ctx": {"days": len(written)}})
+    return written
+
+
 def sync_reference_tables(results_dir: Path, conn: sqlite3.Connection) -> dict[str, int]:
     """The rows needed to READ the mirrored ledger, as plain-git gzip JSONL.
 
@@ -462,6 +524,8 @@ def publish_results(
     n_ledger: dict[str, int] = {}
     if include_ledger:
         n_ledger = sync_ledger_increment(results_dir, conn)
+        # Ride with the ledger: its rows are unreadable without their markets.
+        n_ledger["markets_first_forecast_days"] = len(sync_market_increment(results_dir, conn))
     n_snapshots = 0
     if include_snapshots:
         n_snapshots = sync_snapshots(results_dir, PROJECT_ROOT / storage["snapshots_dir"])

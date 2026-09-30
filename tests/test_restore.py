@@ -8,7 +8,8 @@ from datetime import timedelta
 import pytest
 
 from lab.ledger_commitment import commit_pending_days, verify_ledger
-from lab.publish import sync_ledger_increment, sync_reference_tables
+from lab.publish import (sync_ledger_increment, sync_market_increment,
+                         sync_reference_tables)
 from lab.restore import restore_from_mirror
 from lab.store import db
 from lab.util import now_utc
@@ -107,3 +108,31 @@ def test_a_tampered_day_is_reported_and_an_existing_db_is_never_overwritten(sour
 
     with pytest.raises(FileExistsError):
         restore_from_mirror(results, tmp_path / "restored.db")
+
+
+def test_a_market_newer_than_the_weekly_dump_is_restored_from_its_day(source):
+    """THE gap the 2026-09-30 drill found: the reference dump is weekly, so a
+    market first forecast since the last dump came back as a forecast nobody
+    could read -- 2,616 markets and 222 of their resolutions at the time."""
+    conn, tmp_path = source
+    results = tmp_path / "results"
+    sync_reference_tables(results, conn)          # last week's dump, before 0xnew existed
+
+    day = (now_utc() - timedelta(days=1)).replace(hour=2, minute=0, second=0, microsecond=0)
+    _market(conn, "0xnew")
+    db.append_forecast(conn, {"ts": day.isoformat(timespec="seconds"), "condition_id": "0xnew",
+                              "model_id": "m0_market", "p_yes": 0.4, "p_market_at_ts": 0.4})
+    db.record_resolution(conn, "0xnew", day.isoformat(timespec="seconds"), 0.0, False, "gamma")
+    conn.commit()
+    sync_ledger_increment(results, conn)
+    assert sync_market_increment(results, conn)[day.date().isoformat()] == 1
+
+    report = restore_from_mirror(results, tmp_path / "restored.db")
+    restored = db.connect(tmp_path / "restored.db")
+    row = restored.execute(
+        "SELECT venue, category, question FROM markets WHERE condition_id = '0xnew'").fetchone()
+    assert tuple(row) == ("polymarket", "politics", "Will 0xnew happen?")
+    assert restored.execute(
+        "SELECT COUNT(*) FROM resolutions WHERE condition_id = '0xnew'").fetchone()[0] == 1
+    assert report["rows"]["markets_daily"] >= 1
+    restored.close()
