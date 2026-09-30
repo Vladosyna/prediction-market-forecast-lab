@@ -1609,3 +1609,47 @@ the markets lost are a whole tier, a forecast-time property rather than anything
 decides; that day's tail-tier forecasts are complete; and the lost markets are forecast on the days
 either side. A sensitivity analysis that drops Kalshi rows with `forecast_ts` on 2026-09-30 needs
 nothing beyond the export.
+
+**Addendum 9.40 (2026-09-30).** The confirmatory analysis is computed as of **2027-01-31 00:00 UTC**,
+fixed here before any confirmatory result has been read; and a statement in 9.33 about H1's size is
+corrected.
+
+**Why a date has to be fixed.** 9.1 says the primary analyses "will be executed once, after the
+freeze" and names no date. Under 9.35 a forecast is scored only once its market's stated end date is
+seven days past the moment of analysis, so the date decides which long-horizon forecasts can be
+scored at all, and left open it would be a choice available after the data are in. Measured on
+2026-09-30 over Polymarket `m1_debiased` forecasts frozen since 2026-07-06: **1,640 event clusters**
+already carry a forecast made thirty or more days before their market's stated end date. The number
+whose stated end date would be at least seven days before the analysis is **905** for an analysis on
+2026-12-31, **1,407** on 2027-01-15, **1,433** on 2027-01-31, 1,458 on 2027-02-28 and 1,473 on
+2027-03-31. The jump in January is one block: 436 clusters state an end date in January 2027, most
+of them "by the end of 2026" markets that close on 1 January.
+
+**The date, and why this one.** 2027-01-31 takes in that block with the seven-day lag and about two
+further weeks for outcomes to be recorded; waiting two more months would add about forty clusters and
+delay the analysis by as much. The choice uses only the distribution of stated end dates, which is
+known when a forecast is made; no outcome, and no model's skill, was computed for it.
+
+**What "as of" means.** The confirmatory statistics are computed with `lab eval --as-of
+2027-01-31T00:00:00+00:00` (the constant `CONFIRMATORY_AS_OF` in `lab.eval.run`), and the
+pre-registered robustness checks with the same flag: censoring at that instant, only outcomes the lab
+had recorded by it, nothing frozen after the freeze in the confirmatory window. Rows are written
+under an `_asof_20270131` suffix beside the nightly ones, and recomputing them later gives the same
+result. The weekly paper export of that day (a Sunday) is the replication dataset; a replicator
+applies `resolved_ts <= 2027-01-31T00:00:00Z` together with the rules of 9.35.
+
+**A bound the code did not enforce.** The confirmatory window had no upper bound in code: from
+January every nightly "confirmatory" row would have included forecasts frozen after the freeze, which
+9.1 makes exploratory. It now ends at 2026-12-31 23:59:59 UTC.
+
+**Correction to 9.33 (and to the brief's v2.16 summary).** 9.33 said that H1's primary stratum
+"holds ~150 event clusters — below the plan's 200-cluster INSUFFICIENT threshold. That is the honest
+size of the primary test." It was not. About 150 was the number scoreable on that day; the test is
+computed at the analysis date, when most long-horizon markets now in the ledger will have reached
+their stated ends. From forecasts already made, H1's stratum at 2027-01-31 is projected at about
+**1,430 clusters** — a lower bound on what is forecast, since forecasts continue to the freeze, and
+an upper bound on what is scored, since some markets will not resolve or will be disputed. Scaling the
+sequence measured on 2026-09-25 (about ±0.05 at 268 clusters) by the square root of the cluster
+counts gives roughly ±0.02 at that size, against the ±0.035 9.31 projected — a rough projection,
+but enough to say H1 is a test with real power rather than only a bound. 9.31's commitment to also report the sequence as a bound
+on the effect stands; it costs nothing.

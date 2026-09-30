@@ -132,6 +132,12 @@ lab's own numbers, apply exactly these rules (they live in code as
   orders its confidence sequence by entry time, the later of the recorded
   resolution and stated end + 7 days.
 
+- **The confirmatory analysis instant** (PAP 9.40,
+  `lab.eval.run.CONFIRMATORY_AS_OF`): 2027-01-31T00:00:00Z. Keep rows with
+  `resolved_ts <= 2027-01-31T00:00:00Z`, censor at that instant (stated end
+  plus 7 days on or before it), and read only `forecast_ts <= 2026-12-31T23:59:59Z`
+  for the confirmatory sample. The weekly export of that day is the dataset.
+
 The first three rules were enforced in the lab's own evaluation from
 2026-09-25, the censoring from 2026-09-29; eval rows written before those
 dates do not apply them.

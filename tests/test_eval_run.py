@@ -646,3 +646,49 @@ def test_rps_is_computed_on_the_rows_of_its_own_statistic(config, monkeypatch):
     assert n_events[("polymarket", "confirmatory")] == 1, "the window applies to RPS too"
     assert n_events[("kalshi", "all_time")] == 0, "only Polymarket negRisk groups are exclusive"
     conn.close()
+
+
+# --- the pre-registered analysis instant (2026-09-30, PAP 9.40) --------------
+
+def test_the_confirmatory_window_ends_at_the_freeze():
+    """PAP 9.1: forecasts frozen after 2026-12-31 are exploratory. The window
+    had no upper bound in code, so every nightly "confirmatory" row from
+    January on would have mixed them in."""
+    from lab.eval.run import CONFIRMATORY_END, EVAL_WINDOWS
+
+    assert EVAL_WINDOWS["confirmatory"][2] == CONFIRMATORY_END == "2026-12-31T23:59:59+00:00"
+
+
+def test_an_as_of_run_is_the_same_whenever_it_is_run(config):
+    """The confirmatory analysis is computed as of one pre-registered instant:
+    censored at it, with only the outcomes recorded by it, nothing frozen
+    after it -- and under its own label, beside the nightly rows."""
+    as_of = "2027-01-31T00:00:00+00:00"
+    conn = db.connect(config["storage"]["db_path"])
+    # in: frozen in December, stated end mid-January, recorded before as-of
+    _mk_resolved(conn, "in", "2026-12-01T02:00:00+00:00", "2027-01-16T00:00:00+00:00", 0.0,
+                 end="2027-01-15T00:00:00+00:00")
+    # out: recorded after as-of (re-running in February must not pick it up)
+    _mk_resolved(conn, "late_record", "2026-12-01T02:00:00+00:00",
+                 "2027-02-02T00:00:00+00:00", 0.0, end="2027-01-15T00:00:00+00:00")
+    # out: stated end inside the 7-day lag before as-of, though already resolved
+    _mk_resolved(conn, "in_lag", "2026-12-01T02:00:00+00:00", "2027-01-27T00:00:00+00:00", 1.0,
+                 end="2027-01-26T00:00:00+00:00")
+    # out of the confirmatory window only: frozen after the freeze
+    _mk_resolved(conn, "exploratory", "2027-01-02T02:00:00+00:00",
+                 "2027-01-10T00:00:00+00:00", 0.0, end="2027-01-09T00:00:00+00:00")
+    conn.commit()
+
+    run_eval(conn, config, as_of=as_of)
+
+    def n(label):
+        row = conn.execute(
+            "SELECT n FROM eval_runs WHERE model_id='m0_market' AND venue='polymarket' "
+            "AND category=? AND window_label=? ORDER BY id DESC LIMIT 1",
+            (ALL_CATEGORIES, label)).fetchone()
+        return row["n"] if row else 0
+
+    assert n("confirmatory_asof_20270131") == 1
+    assert n("all_time_asof_20270131") == 2
+    assert n("confirmatory") == 0, "an as-of run never writes a nightly-labelled row"
+    conn.close()

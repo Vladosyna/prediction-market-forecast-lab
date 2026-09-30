@@ -188,31 +188,47 @@ def eval(
     robustness: bool = typer.Option(
         False, "--robustness",
         help="Run EVERY robustness check the pre-analysis plan pre-registered "
-             "(9.2b, 9.3a, 9.5, 9.11, 9.18-9.21, 9.22), each as a full pass of the "
-             "matrix under its own window_label suffix. Hours on the VPS -- run it "
-             "for the confirmatory analysis, ideally against a copy of the db.",
+             "(9.2b, 9.3a, 9.5, 9.11, 9.18-9.21, 9.22, 9.35), each as a full pass of "
+             "the matrix under its own window_label suffix. Hours on the VPS -- run "
+             "it for the confirmatory analysis, ideally against a copy of the db.",
+    ),
+    as_of: str | None = typer.Option(
+        None, "--as-of",
+        help="Compute the matrix as of this UTC instant: censoring at it, only "
+             "outcomes recorded by it, nothing frozen after it; rows are labelled "
+             "'_asof_YYYYMMDD'. The confirmatory analysis is pre-registered for "
+             "2027-01-31T00:00:00+00:00 (PAP 9.40, lab.eval.run.CONFIRMATORY_AS_OF). "
+             "Combines with --robustness.",
     ),
 ) -> None:
     """Score resolved forecasts: paired Brier/log-loss, skill with bootstrap CIs."""
+    if as_of is not None:
+        from datetime import datetime
+
+        stamp = datetime.fromisoformat(as_of)
+        if stamp.tzinfo is None:
+            raise typer.BadParameter("--as-of needs an explicit UTC offset, e.g. +00:00")
+        as_of = stamp.isoformat(timespec="seconds")
     if robustness:
         from lab.eval.run import run_robustness_checks
         from lab.store import db
 
         conn = db.connect(load_config()["storage"]["db_path"])
         try:
-            done = run_robustness_checks(conn, load_config())
+            done = run_robustness_checks(conn, load_config(), as_of=as_of)
         finally:
             conn.close()
         for name, n in done.items():
             typer.echo(f"  robustness {name}: {n} summaries")
         return
-    if include_disputed:
+    if include_disputed or as_of is not None:
         from lab.eval.run import run_eval
         from lab.store import db
 
         conn = db.connect(load_config()["storage"]["db_path"])
         try:
-            summaries = run_eval(conn, load_config(), include_disputed=True)
+            summaries = run_eval(conn, load_config(), include_disputed=include_disputed,
+                                 as_of=as_of)
         finally:
             conn.close()
     else:

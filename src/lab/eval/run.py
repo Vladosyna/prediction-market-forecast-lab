@@ -37,8 +37,18 @@ WINDOWS = {"all_time": None, "trailing_90d": 90}
 # confirmatory sample §6 defines. A pre-registered rule protects the analysis
 # only once it is code written before the results are read.
 #
-# PAP §6: confirmatory = forecasts made on or after the commitment date.
+# PAP §6: confirmatory = forecasts made on or after the commitment date...
 CONFIRMATORY_START = "2026-07-06"
+# ...and on or before the freeze (PAP 9.1); later forecasts are exploratory.
+# Until 2026-09-30 the window had no upper bound in code, so from January every
+# nightly "confirmatory" row would have mixed exploratory forecasts in.
+CONFIRMATORY_END = "2026-12-31T23:59:59+00:00"
+# PAP 9.40: the one instant the confirmatory analysis is computed as of --
+# `lab eval --as-of` with this value. Under the stated-end censoring of 9.35 the
+# analysis date decides which long-horizon forecasts are scoreable at all, so
+# it is fixed in advance, from the distribution of stated end dates (forecast-
+# time information), rather than chosen once results can be seen.
+CONFIRMATORY_AS_OF = "2027-01-31T00:00:00+00:00"
 # Forecast-date windows excluded "for any Kalshi-population statistic",
 # inclusive, each with the addendum that declared it.
 KALSHI_EXCLUSION_WINDOWS = (
@@ -75,9 +85,9 @@ ENTRY_TS_SQL = f"strftime('%Y-%m-%dT%H:%M:%S+00:00', {ENTRY_JD_SQL})"
 # sample, not a chosen window, so CLAUDE.md §7's "no cherry-picked windows"
 # rule is what requires it rather than what forbids it.
 EVAL_WINDOWS = {
-    "all_time": (None, None),
-    "trailing_90d": (90, None),
-    "confirmatory": (None, CONFIRMATORY_START),
+    "all_time": (None, None, None),
+    "trailing_90d": (90, None, None),
+    "confirmatory": (None, CONFIRMATORY_START, CONFIRMATORY_END),
 }
 
 # Sentinel category value for the "all categories pooled, this venue" row --
@@ -105,6 +115,7 @@ def resolved_forecast_rows(
     null_control_ids: set[str] | None = None, invert_null_control: bool = False,
     include_disputed: bool = False, since_ts: str | None = None,
     apply_exclusions: bool = False, scoreable_at: str | None = None,
+    until_ts: str | None = None, recorded_by: str | None = None,
 ) -> list[dict]:
     """Paired rows: forecast + resolution outcome + venue/category/event_id
     for one model, optionally scoped to one venue and/or one category.
@@ -119,7 +130,11 @@ def resolved_forecast_rows(
     scoreable_at (PAP 9.35) keeps only rows whose stated end date is
     SCORING_LAG_DAYS before it, and fills `entry_ts`. Off by default for the
     same reason as `apply_exclusions`: the paper export is the complete record
-    and carries every field a replicator needs to apply the rule."""
+    and carries every field a replicator needs to apply the rule.
+
+    `until_ts` bounds the forecast time from above; `recorded_by` keeps only
+    outcomes the lab had recorded by then, so a statistic computed "as of" a
+    date is the same whenever it is re-run (PAP 9.40)."""
     entry = ENTRY_TS_SQL if scoreable_at is not None else "NULL"
     query = f"""
         SELECT f.condition_id, f.p_yes, f.p_market_at_ts, f.spread_at_ts,
@@ -159,6 +174,12 @@ def resolved_forecast_rows(
     if since_ts is not None:
         query += " AND f.ts >= ?"
         params.append(since_ts)
+    if until_ts is not None:
+        query += " AND f.ts <= ?"
+        params.append(until_ts)
+    if recorded_by is not None:
+        query += " AND r.resolved_ts <= ?"
+        params.append(recorded_by)
     if apply_exclusions and KALSHI_EXCLUSION_WINDOWS:
         # Off by default so the paper export stays the complete replication
         # dataset (every row carries forecast_ts, so a replicator applies the
@@ -350,10 +371,26 @@ def _realized_horizon_bucket(row: dict) -> str | None:
     return _bucket_for_days(_days_between(row.get("forecast_ts"), resolved))
 
 
+def _window_bounds(days: int | None, since: str | None, until: str | None,
+                   as_of: str | None) -> tuple[int | None, str | None, str | None]:
+    """A window's (trailing days, since, until) with an as-of date applied:
+    trailing windows count back from the as-of instant instead of from now,
+    and nothing frozen after it is read."""
+    if as_of is None:
+        return days, since, until
+    if days is not None:
+        cutoff = (datetime.fromisoformat(as_of) - timedelta(days=days)).isoformat(
+            timespec="seconds")
+        since = max(since, cutoff) if since else cutoff
+        days = None
+    until = min(until, as_of) if until else as_of
+    return days, since, until
+
+
 def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
              row_filter: Callable[[list[dict]], list[dict]] | None = None,
              suffix: str = "", models: frozenset[str] | set[str] | None = None,
-             censor: bool = True,
+             censor: bool = True, as_of: str | None = None,
              ) -> list[dict[str, Any]]:
     """include_disputed=False (default) is the unchanged nightly path.
     include_disputed=True is PAP Addendum 9.2(b)'s robustness re-run: same
@@ -371,7 +408,13 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
     keep = row_filter or (lambda rows: rows)
     # One cutoff for the whole run (PAP 9.35), so every row of the matrix is
     # censored at the same instant; `censor=False` is the named sensitivity.
-    scoreable_at = now_utc_iso() if censor else None
+    # `as_of` (PAP 9.40) moves that instant into the past and also drops
+    # outcomes recorded after it, so the confirmatory analysis -- computed as
+    # of CONFIRMATORY_AS_OF -- comes out the same whenever it is run. Its rows
+    # carry their own label suffix and never overwrite a nightly row.
+    if as_of is not None:
+        label_suffix += "_asof_" + as_of[:10].replace("-", "")
+    scoreable_at = (as_of or now_utc_iso()) if censor else None
 
     nc_ids_by_venue = null_control_ids_by_venue(conn, config)
     legs = negrisk_legs(conn)   # once per run: every RPS statistic reads it
@@ -399,11 +442,13 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
         for venue, categories in venue_categories.items():
             nc_ids = nc_ids_by_venue.get(venue)
             for category in categories:
-                for label, (days, since) in EVAL_WINDOWS.items():
+                for label, bounds in EVAL_WINDOWS.items():
+                    days, since, until = _window_bounds(*bounds, as_of)
                     rows = resolved_forecast_rows(
                         conn, model_id, days, venue=venue, category=category,
                         null_control_ids=nc_ids, include_disputed=include_disputed,
                         since_ts=since, apply_exclusions=True, scoreable_at=scoreable_at,
+                        until_ts=until, recorded_by=as_of,
                     )
                     rows = keep(rows)
                     summary = evaluate_model(
@@ -415,11 +460,12 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
             # "ALL categories" aggregate row per venue -- per-category n stays
             # sparse for months (brief section 11 timelines), this keeps a
             # non-sparse view available from day one.
-            for label, (days, since) in EVAL_WINDOWS.items():
+            for label, bounds in EVAL_WINDOWS.items():
+                days, since, until = _window_bounds(*bounds, as_of)
                 rows = resolved_forecast_rows(
                     conn, model_id, days, venue=venue, null_control_ids=nc_ids,
                     include_disputed=include_disputed, since_ts=since, apply_exclusions=True,
-                    scoreable_at=scoreable_at,
+                    scoreable_at=scoreable_at, until_ts=until, recorded_by=as_of,
                 )
                 rows = keep(rows)
                 summary = evaluate_model(
@@ -471,6 +517,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                 conn, model_id, None, venue=venue, null_control_ids=nc_ids,
                 invert_null_control=True, include_disputed=include_disputed,
                 apply_exclusions=True, scoreable_at=scoreable_at,
+                until_ts=as_of, recorded_by=as_of,
             )
             nc_rows = keep(nc_rows)
             nc_summary = evaluate_model(
@@ -552,8 +599,8 @@ ROBUSTNESS_CHECKS: dict[str, dict[str, Any]] = {
 }
 
 
-def run_robustness_checks(conn, config: dict[str, Any],
-                          names: list[str] | None = None) -> dict[str, int]:
+def run_robustness_checks(conn, config: dict[str, Any], names: list[str] | None = None,
+                          as_of: str | None = None) -> dict[str, int]:
     """Every pre-registered robustness check (or the named subset), each as a
     full pass of the evaluation matrix under its own window_label suffix.
     Returns {check: summaries written}."""
@@ -567,7 +614,8 @@ def run_robustness_checks(conn, config: dict[str, Any],
         summaries = run_eval(conn, config,
                              include_disputed=spec.get("include_disputed", False),
                              row_filter=spec.get("filter"), suffix=spec.get("suffix", ""),
-                             models=spec.get("models"), censor=spec.get("censor", True))
+                             models=spec.get("models"), censor=spec.get("censor", True),
+                             as_of=as_of)
         out[name] = len(summaries)
         log.info("robustness check complete",
                  extra={"ctx": {"check": name, "pap": spec["pap"], "summaries": len(summaries)}})
