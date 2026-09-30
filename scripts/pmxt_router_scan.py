@@ -22,9 +22,11 @@ Output: data/pmxt_candidates.json, a plain list of
 relation_type, confidence, scanned_ts}. This file is read-only input to
 lab.models.m7_crossvenue.verify_pmxt_candidates, which is the only code
 path that ever writes into data/markets_map.yaml -- nothing here is
-auto-confirmed; a human still runs `lab map confirm`. New candidates are
-added to whatever the file already holds, so a scan landing before the last
-one's candidates were verified cannot erase them.
+auto-confirmed; a human still runs `lab map confirm`. Every 50 lookups, new
+candidates are appended to whatever the file holds at that moment, and the
+verify job removes only the candidates it got through, so a scan and a verify
+running at the same time (both are scheduled at 17:00) never erase each
+other's work.
 
 What it asks (2026-09-30): for each Polymarket market M7 could use -- open, in
 a snapshotted tier, in a priority category -- that has no Kalshi pair yet,
@@ -43,17 +45,30 @@ whether or not the lookup succeeded -- ordering on successes alone is how the
 lab's resolution watchers and series rotation wedged, one after another. Never
 looked-up markets go first, then the longest ago; a timed run takes a batch,
 `--full` takes them all.
+
+pmxt's hosted API leaves a large share of these requests unanswered: on
+2026-09-30, 10 of 20 random lookups gave nothing in 20 s while the rest
+answered in about 1.5 s, and slugs that had hung answered at once when asked
+again. Its generated REST layer hands urllib3 `timeout=None` -- wait forever --
+unless a call brings its own timeout, which the Router's methods never do, so
+socket.setdefaulttimeout() cannot bound them either (tried that day). Every
+client here is given a real one (_bounded): an unanswered request is closed
+and urllib3 asks again. Lookups run a few at a time, new ones start at most
+once a second, and a run stops when nearly every recent lookup has failed.
+Only one scan runs at a time; a second exits rather than race the first over
+the same files.
 """
 
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import sqlite3
 import sys
-import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -69,16 +84,18 @@ from lab.util import load_config  # noqa: E402
 
 OUTPUT_PATH = REPO_ROOT / "data" / "pmxt_candidates.json"
 LOOKUP_STATE_PATH = REPO_ROOT / "data" / "pmxt_lookup_state.json"
+LOCK_PATH = REPO_ROOT / "data" / "pmxt_scan.lock"
 
 # Markets per timed run (twice a day): a full pass over ~2,100 usable markets
-# in under four days at ~3 s a lookup, ~15 minutes a run.
+# in under four days.
 DEFAULT_BATCH = 300
-# pmxt's Router takes no timeout and its client will wait out the server's own
-# 900-second hold; a lookup gets this long on a worker thread, then is
-# abandoned. A run stops after this many in a row, since the API is then down.
-LOOKUP_TIMEOUT_S = 60
-MAX_CONSECUTIVE_TIMEOUTS = 5
-PACING_S = 1.5
+# Per HTTP request. Answers came in ~1.5 s (8.4 s at the slowest seen); a
+# request that times out is asked again by urllib3, up to its default 3 retries.
+LOOKUP_TIMEOUT_S = 15
+WORKERS = 3
+START_INTERVAL_S = 1.0          # at most one new lookup a second
+FAIL_WINDOW, FAIL_STOP_SHARE = 30, 0.9
+_END = object()
 
 
 def _known_pairs() -> tuple[set[tuple[str, str]], set[str]]:
@@ -121,6 +138,29 @@ def _load_json(path: Path, default):
         return default
 
 
+def _write_json(path: Path, value, **dump_kwargs) -> None:
+    """Whole or not at all: the verify job reads the candidates file while a
+    scan runs."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(value, **dump_kwargs), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _save(new_candidates: list[dict], state: dict, candidates_path: Path, state_path: Path) -> int:
+    """Append this run's unsaved candidates to what the candidates file holds
+    NOW -- the verify job consumes it at 17:00 and 21:00, often mid-scan -- then
+    write the lookup stamps. In that order, a run killed between the two asks
+    those markets again rather than losing their candidates. Returns how many
+    were appended."""
+    current = _load_json(candidates_path, [])
+    have = {(c.get("poly_condition_id"), c.get("kalshi_ticker")) for c in current}
+    added = [c for c in new_candidates if (c["poly_condition_id"], c["kalshi_ticker"]) not in have]
+    _write_json(candidates_path, current + added, indent=2)
+    _write_json(state_path, state, sort_keys=True)
+    return len(added)
+
+
 def _attr(obj, *names, default=None):
     """First NON-NONE attribute across possible pmxt schema spellings.
 
@@ -151,23 +191,75 @@ def _dump(obj) -> str:
     return repr(obj)
 
 
-def _with_timeout(fn, timeout_s: float):
-    """(finished, result, error) for fn() run on a daemon thread; a call still
-    running after timeout_s is abandoned rather than waited for."""
-    box: dict = {}
+def _bounded(router, timeout_s: float = LOOKUP_TIMEOUT_S):
+    """`router` with a timeout on every HTTP request it makes. pmxt's generated
+    ApiClient.call_api takes one (`_request_timeout`) that the Router never
+    passes; a pmxt release without it fails here instead of hanging."""
+    api_client = router._api_client
+    call_api = api_client.call_api
+    if "_request_timeout" not in inspect.signature(call_api).parameters:
+        raise RuntimeError("pmxt's ApiClient.call_api no longer takes _request_timeout -- "
+                           "the scan cannot bound its requests")
 
-    def run():
-        try:
-            box["result"] = fn()
-        except Exception as exc:  # noqa: BLE001 -- reported to the caller
-            box["error"] = exc
+    def call_api_bounded(*args, **kwargs):
+        kwargs.setdefault("_request_timeout", timeout_s)
+        return call_api(*args, **kwargs)
 
-    t = threading.Thread(target=run, daemon=True)
-    t.start()
-    t.join(timeout_s)
-    if t.is_alive():
-        return False, None, None
-    return True, box.get("result"), box.get("error")
+    api_client.call_api = call_api_bounded
+    return router
+
+
+def _run_lookups(jobs, lookup, workers: int = WORKERS, start_interval_s: float = START_INTERVAL_S,
+                 clock=time.monotonic, sleep=time.sleep):
+    """Yield (job, result, error) for each job, at most `workers` lookups in
+    flight and a new one started at most once per start_interval_s. Each lookup
+    bounds itself (_bounded); none is abandoned. Stops starting lookups once
+    FAIL_STOP_SHARE of the last FAIL_WINDOW failed -- pmxt is then down, and
+    stamping the rest as looked up would send them to the back unasked."""
+    jobs = iter(jobs)
+    recent: list[bool] = []
+    last_start = None
+    stop = False
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        running: dict = {}
+        while True:
+            while not stop and len(running) < workers:
+                job = next(jobs, _END)
+                if job is _END:
+                    stop = True
+                    break
+                if last_start is not None:
+                    sleep(max(0.0, start_interval_s - (clock() - last_start)))
+                last_start = clock()
+                running[pool.submit(lookup, job)] = job
+            if not running:
+                return
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in done:
+                job, error = running.pop(future), future.exception()
+                recent = (recent + [error is not None])[-FAIL_WINDOW:]
+                yield job, None if error else future.result(), error
+            if not stop and len(recent) == FAIL_WINDOW and sum(recent) >= FAIL_STOP_SHARE * FAIL_WINDOW:
+                print(f"{sum(recent)} of the last {FAIL_WINDOW} lookups failed -- pmxt looks down, stopping")
+                stop = True
+
+
+def _lock_or_none(path: Path):
+    """An open, exclusively locked handle held for the run, or None when another
+    scan holds it: two scans at once (the 17:00 timer beside a manual --full)
+    would each rewrite the candidate and lookup-state files from their own
+    start-of-run copy. Windows has no fcntl, and no timer runs the scan there."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a")
+    try:
+        import fcntl
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except ImportError:
+        pass
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
 
 
 def _candidate(cluster, now_iso: str) -> dict | None:
@@ -222,11 +314,15 @@ def main() -> None:
     if not api_key:
         print("PMXT_API_KEY not set in .env -- nothing to do.")
         return
+    lock = _lock_or_none(LOCK_PATH)
+    if lock is None:
+        print("another pmxt scan is running -- exiting")
+        return
 
     import pmxt  # deliberately the only import site in this repo -- see module docstring
 
+    _bounded(pmxt.Router(pmxt_api_key=api_key))  # a pmxt that cannot be bounded stops the run here
     config = load_config()
-    router = pmxt.Router(pmxt_api_key=api_key)
     known_pairs, paired_markets = _known_pairs()
     usable = _usable_polymarket_markets(config)
     state: dict[str, str] = _load_json(LOOKUP_STATE_PATH, {})
@@ -235,54 +331,46 @@ def main() -> None:
     print(f"usable Polymarket markets {len(usable)}, already paired {len(paired_markets & set(usable))}, "
           f"to look up {len(order)}, this run {len(batch)}")
 
-    existing = _load_json(OUTPUT_PATH, [])
-    have = {(c["poly_condition_id"], c["kalshi_ticker"]) for c in existing}
-    candidates = list(existing)
+    have = known_pairs | {(c.get("poly_condition_id"), c.get("kalshi_ticker"))
+                          for c in _load_json(OUTPUT_PATH, [])}
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    looked = timeouts_in_row = failures = matched_markets = 0
+    looked = failures = matched_markets = appended = 0
+    unsaved: list[dict] = []
 
-    for i, cid in enumerate(batch):
-        if i:
-            time.sleep(PACING_S)   # polite pacing (brief guardrail 4, extended to pmxt's API)
-        finished, clusters, error = _with_timeout(
-            lambda slug=usable[cid]: router.fetch_matched_market_clusters(
-                slug=slug, relation="identity", venues="polymarket,kalshi"),
-            LOOKUP_TIMEOUT_S)
+    def lookup(cid):
+        # A client per lookup: pmxt does not say its client is thread-safe.
+        router = _bounded(pmxt.Router(pmxt_api_key=api_key))
+        return router.fetch_matched_market_clusters(
+            slug=usable[cid], relation="identity", venues="polymarket,kalshi")
+
+    for cid, clusters, error in _run_lookups(batch, lookup):
         state[cid] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         looked += 1
-        if not finished:
-            timeouts_in_row += 1
-            failures += 1
-            print(f"{cid[:12]}: no answer in {LOOKUP_TIMEOUT_S} s")
-            if timeouts_in_row >= MAX_CONSECUTIVE_TIMEOUTS:
-                print(f"{timeouts_in_row} lookups in a row timed out -- pmxt looks down, stopping")
-                break
-            continue
-        timeouts_in_row = 0
         if error is not None:
             failures += 1
-            print(f"{cid[:12]}: {type(error).__name__}: {str(error)[:80]}")
-            continue
-        found = False
-        for cluster in clusters or []:
-            cand = _candidate(cluster, now_iso)
-            if cand is None or cand["poly_condition_id"] != cid:
-                continue
-            key = (cand["poly_condition_id"], cand["kalshi_ticker"])
-            if key in known_pairs or key in have:
-                continue
-            have.add(key)
-            candidates.append(cand)
-            found = True
-        matched_markets += found
+            if failures <= 5:
+                print(f"{cid[:12]} {usable[cid][:50]}: {type(error).__name__}: {str(error)[:160]}")
+        else:
+            found = False
+            for cluster in clusters or []:
+                cand = _candidate(cluster, now_iso)
+                if cand is None or cand["poly_condition_id"] != cid:
+                    continue
+                key = (cand["poly_condition_id"], cand["kalshi_ticker"])
+                if key in have:
+                    continue
+                have.add(key)
+                unsaved.append(cand)
+                found = True
+            matched_markets += found
         if looked % 50 == 0:
-            LOOKUP_STATE_PATH.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+            appended += _save(unsaved, state, OUTPUT_PATH, LOOKUP_STATE_PATH)
+            unsaved.clear()
+            print(f"{looked} looked up, {failures} failed, {matched_markets} matched")
 
-    LOOKUP_STATE_PATH.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(json.dumps(candidates, indent=2), encoding="utf-8")
+    appended += _save(unsaved, state, OUTPUT_PATH, LOOKUP_STATE_PATH)
     print(f"looked up {looked} market(s), {failures} failed, {matched_markets} with a new Kalshi match; "
-          f"{len(candidates) - len(existing)} new candidate(s), {len(candidates)} in {OUTPUT_PATH.name}")
+          f"{appended} new candidate(s) written to {OUTPUT_PATH.name}")
 
 
 if __name__ == "__main__":

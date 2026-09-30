@@ -822,6 +822,67 @@ def test_verify_pmxt_candidates_skips_malformed_entry_missing_fields(config, tmp
     conn.close()
 
 
+def _pmxt_candidate(condition_id, ticker):
+    return {"poly_condition_id": condition_id, "poly_question": f"q {condition_id}",
+            "kalshi_ticker": ticker, "kalshi_title": f"t {ticker}", "relation_type": "identity",
+            "confidence": 0.9, "scanned_ts": "2026-09-30T17:00:00+00:00"}
+
+
+def test_verify_pmxt_candidates_keeps_what_the_scan_adds_while_it_runs(config, tmp_path):
+    """A scan is one lookup per market now and runs for minutes to hours
+    beside the 17:00/21:00 verify; clearing the whole file at the end erased
+    whatever the scan had appended in the meantime."""
+    conn = db.connect(config["storage"]["db_path"])
+    _insert_market(conn)
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    cand_path = tmp_path / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([_pmxt_candidate("0x1", "FEDMAR")]), encoding="utf-8")
+
+    class ScanAppendsMeanwhile(FakeLlm):
+        def complete(self, system, prompt, purpose, max_tokens=2000):
+            current = json.loads(cand_path.read_text(encoding="utf-8"))
+            cand_path.write_text(json.dumps(current + [_pmxt_candidate("0x9", "LATER")]),
+                                 encoding="utf-8")
+            return super().complete(system, prompt, purpose, max_tokens)
+
+    llm = ScanAppendsMeanwhile({"match": True, "confidence": 0.9, "rationale": "x"})
+    proposals = verify_pmxt_candidates(conn, config, llm, candidates_path=cand_path,
+                                       markets_map_path=map_path)
+
+    assert [p["external_id"] for p in proposals] == ["FEDMAR"]
+    assert json.loads(cand_path.read_text(encoding="utf-8")) == [_pmxt_candidate("0x9", "LATER")]
+    conn.close()
+
+
+def test_verify_pmxt_candidates_stops_at_the_llm_cap_keeping_proposals_and_the_rest(config, tmp_path):
+    from lab.news.extract import BudgetExceeded
+
+    conn = db.connect(config["storage"]["db_path"])
+    for cid in ("0x1", "0x2", "0x3"):
+        _insert_market(conn, condition_id=cid)
+    map_path = tmp_path / "markets_map.yaml"
+    save_markets_map({"confirmed": [], "proposed": []}, map_path)
+    cand_path = tmp_path / "pmxt_candidates.json"
+    cand_path.write_text(json.dumps([_pmxt_candidate("0x1", "A"), _pmxt_candidate("0x2", "B"),
+                                     _pmxt_candidate("0x3", "C")]), encoding="utf-8")
+
+    class CapAfterOne(FakeLlm):
+        def complete(self, system, prompt, purpose, max_tokens=2000):
+            if self.calls == 1:
+                raise BudgetExceeded("daily LLM cap reached")
+            return super().complete(system, prompt, purpose, max_tokens)
+
+    llm = CapAfterOne({"match": True, "confidence": 0.9, "rationale": "x"})
+    proposals = verify_pmxt_candidates(conn, config, llm, candidates_path=cand_path,
+                                       markets_map_path=map_path)
+
+    assert [p["external_id"] for p in proposals] == ["A"]
+    assert [p["external_id"] for p in load_markets_map(map_path)["proposed"]] == ["A"]
+    assert [c["kalshi_ticker"] for c in json.loads(cand_path.read_text(encoding="utf-8"))] == ["B", "C"]
+    conn.close()
+
+
 # --- commit_and_push_markets_map (multi-host pmxt: needed once the
 # scan+verify cycle can run on a host that isn't the one M7 reads at forecast
 # time -- see jobs.run_pmxt_verify_job) ------------------------------------

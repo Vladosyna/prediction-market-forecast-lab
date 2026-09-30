@@ -7,9 +7,13 @@ pure helpers are exercised directly."""
 from __future__ import annotations
 
 import importlib.util
+import json
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from lab.store import db
 
@@ -54,17 +58,106 @@ def test_never_asked_first_then_oldest_and_paired_markets_skipped():
     assert scan._lookup_order(usable, paired={"d"}, state=state) == ["c", "b", "a"]
 
 
-def test_a_hanging_lookup_is_abandoned_not_waited_for():
-    """pmxt held a request for 900 s on 2026-09-30 and its Router takes no
-    timeout; the scan gives each lookup a bounded wait on its own thread."""
+def test_saving_appends_to_what_the_candidates_file_holds_now(tmp_path):
+    """The verify job consumes the file at 17:00 and 21:00, often mid-scan: a
+    save appends to what is there now instead of rewriting a start-of-run copy."""
     scan = _load()
-    start = time.monotonic()
-    finished, result, error = scan._with_timeout(lambda: time.sleep(5), 0.2)
-    assert (finished, result, error) == (False, None, None)
-    assert time.monotonic() - start < 2
-    assert scan._with_timeout(lambda: 42, 1) == (True, 42, None)
-    finished, _, error = scan._with_timeout(lambda: 1 / 0, 1)
-    assert finished and isinstance(error, ZeroDivisionError)
+    cands, stamps = tmp_path / "pmxt_candidates.json", tmp_path / "pmxt_lookup_state.json"
+    a = {"poly_condition_id": "0xa", "kalshi_ticker": "A"}
+    b = {"poly_condition_id": "0xb", "kalshi_ticker": "B"}
+    assert scan._save([a], {"0xa": "t1"}, cands, stamps) == 1
+    cands.write_text("[]", encoding="utf-8")                      # verified and consumed
+    assert scan._save([b], {"0xa": "t1", "0xb": "t2"}, cands, stamps) == 1
+    assert scan._save([b], {"0xa": "t1", "0xb": "t2"}, cands, stamps) == 0
+    assert json.loads(cands.read_text(encoding="utf-8")) == [b]
+    assert json.loads(stamps.read_text(encoding="utf-8")) == {"0xa": "t1", "0xb": "t2"}
+
+
+def test_every_pmxt_request_carries_a_timeout():
+    """pmxt's REST layer hands urllib3 timeout=None -- wait forever -- unless
+    the call brings its own, and the Router never does: requests were held
+    900 s on 2026-09-30, and half of a random sample hung past 20 s."""
+    scan = _load()
+    seen = []
+
+    class ApiClient:
+        def call_api(self, method, url, header_params=None, body=None, post_params=None,
+                     _request_timeout=None):
+            seen.append(_request_timeout)
+
+    router = scan._bounded(SimpleNamespace(_api_client=ApiClient()), 15)
+    router._api_client.call_api("GET", "https://example.invalid/v0/matched-market-clusters")
+    assert seen == [15]
+
+
+def test_a_pmxt_whose_requests_cannot_be_bounded_is_refused():
+    scan = _load()
+
+    class ApiClient:
+        def call_api(self, method, url, header_params=None):
+            pass
+
+    with pytest.raises(RuntimeError):
+        scan._bounded(SimpleNamespace(_api_client=ApiClient()), 15)
+
+
+def test_lookups_run_a_few_at_a_time_and_every_outcome_is_reported():
+    scan = _load()
+    active, peak, guard = [0], [0], threading.Lock()
+
+    def lookup(job):
+        with guard:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        try:
+            time.sleep(0.02)
+            if job % 3 == 0:
+                raise TimeoutError("read timed out")
+            return job * 10
+        finally:
+            with guard:
+                active[0] -= 1
+
+    got = {job: (result, error) for job, result, error in
+           scan._run_lookups(range(1, 10), lookup, workers=2, start_interval_s=0.0)}
+    assert len(got) == 9 and got[1] == (10, None) and got[8] == (80, None)
+    assert got[3][0] is None and isinstance(got[3][1], TimeoutError)
+    assert peak[0] <= 2
+
+
+def test_new_lookups_start_at_most_once_per_interval():
+    scan = _load()
+    now, slept = [0.0], []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+
+    list(scan._run_lookups(range(4), lambda job: job, workers=1, start_interval_s=1.0,
+                           clock=lambda: now[0], sleep=sleep))
+    assert slept == [1.0, 1.0, 1.0]
+
+
+def test_a_run_stops_when_nearly_every_recent_lookup_fails(monkeypatch):
+    scan = _load()
+    monkeypatch.setattr(scan, "FAIL_WINDOW", 4)
+
+    def lookup(job):
+        raise ConnectionRefusedError("pmxt down")
+
+    seen = list(scan._run_lookups(range(40), lookup, workers=2, start_interval_s=0.0))
+    assert 4 <= len(seen) < 40 and all(error is not None for _, _, error in seen)
+
+
+def test_a_second_scan_does_not_run_beside_the_first(tmp_path):
+    pytest.importorskip("fcntl")
+    scan = _load()
+    first = scan._lock_or_none(tmp_path / "scan.lock")
+    assert first is not None and scan._lock_or_none(tmp_path / "scan.lock") is None
+    first.close()
+    again = scan._lock_or_none(tmp_path / "scan.lock")
+    assert again is not None
+    again.close()
 
 
 def test_a_cluster_becomes_a_candidate_with_the_kalshi_outcomes():

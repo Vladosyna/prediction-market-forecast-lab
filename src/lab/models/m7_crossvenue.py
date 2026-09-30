@@ -765,12 +765,18 @@ def verify_pmxt_candidates(conn, config: dict[str, Any], llm,
     markets_map.yaml before M7 ever reads it (unchanged propose-then-confirm
     contract).
 
-    Consumes (clears) the candidates file every run regardless of outcome --
-    the next scheduled pmxt scan repopulates it fresh, and re-verifying the
-    same stale candidates forever would just burn LLM budget on pairs already
-    accepted, rejected, or since resolved/delisted.
+    Consumes every candidate it gets through, whatever the outcome --
+    re-verifying the same stale candidates forever would just burn LLM budget
+    on pairs already accepted, rejected, or since resolved/delisted -- and
+    keeps the rest: candidates the scan appended while this ran (a scan is
+    now one lookup per market and takes minutes to hours, 2026-09-30), and
+    the ones left when the daily LLM cap runs out, which used to take the
+    proposals already made with it.
     """
-    candidates = load_pmxt_candidates(candidates_path)
+    from lab.news.extract import BudgetExceeded
+
+    path = candidates_path or DEFAULT_PMXT_CANDIDATES_PATH
+    candidates = load_pmxt_candidates(path)
     if not candidates:
         return []
 
@@ -778,7 +784,8 @@ def verify_pmxt_candidates(conn, config: dict[str, Any], llm,
     already = {(e["condition_id"], e["venue"]) for e in data.get("confirmed", []) + data.get("proposed", [])}
 
     proposals: list[dict[str, Any]] = []
-    for c in candidates:
+    got_through = len(candidates)
+    for i, c in enumerate(candidates):
         condition_id = c.get("poly_condition_id")
         kalshi_ticker = c.get("kalshi_ticker")
         if not condition_id or not kalshi_ticker or (condition_id, "kalshi") in already:
@@ -791,15 +798,21 @@ def verify_pmxt_candidates(conn, config: dict[str, Any], llm,
             continue
         description = row["description"] if row else None
 
-        text, _usage = llm.complete(
-            PMXT_VERIFY_SYSTEM,
-            _pmxt_verify_prompt(question, description, c.get("kalshi_title", ""),
-                                c.get("relation_type", "unknown"), float(c.get("confidence", 0.0)),
-                                kalshi_ticker=kalshi_ticker,
-                                kalshi_outcomes=c.get("kalshi_outcomes"),
-                                kalshi_description=c.get("kalshi_description")),
-            purpose="m7_pmxt_verify",
-        )
+        try:
+            text, _usage = llm.complete(
+                PMXT_VERIFY_SYSTEM,
+                _pmxt_verify_prompt(question, description, c.get("kalshi_title", ""),
+                                    c.get("relation_type", "unknown"), float(c.get("confidence", 0.0)),
+                                    kalshi_ticker=kalshi_ticker,
+                                    kalshi_outcomes=c.get("kalshi_outcomes"),
+                                    kalshi_description=c.get("kalshi_description")),
+                purpose="m7_pmxt_verify",
+            )
+        except BudgetExceeded as exc:
+            log.warning("m7: pmxt verify stopped at the daily LLM cap; the rest wait for the next run",
+                        extra={"ctx": {"verified": i, "left": len(candidates) - i, "error": str(exc)}})
+            got_through = i
+            break
         try:
             parsed = json.loads(text.strip().strip("`").removeprefix("json"))
         except (json.JSONDecodeError, AttributeError):
@@ -824,5 +837,13 @@ def verify_pmxt_candidates(conn, config: dict[str, Any], llm,
         data.setdefault("proposed", []).extend(proposals)
         save_markets_map(data, markets_map_path)
 
-    (candidates_path or DEFAULT_PMXT_CANDIDATES_PATH).write_text("[]", encoding="utf-8")
+    done = {_candidate_key(c) for c in candidates[:got_through]}
+    remaining = [c for c in load_pmxt_candidates(path) if _candidate_key(c) not in done]
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(remaining, indent=2), encoding="utf-8")
+    tmp.replace(path)  # the scan writes the same way, so neither reads the other's half-file
     return proposals
+
+
+def _candidate_key(c: dict[str, Any]) -> tuple[Any, Any]:
+    return c.get("poly_condition_id"), c.get("kalshi_ticker")
