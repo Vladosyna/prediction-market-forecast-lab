@@ -59,6 +59,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sqlite3
 import sys
 import time
@@ -123,10 +124,17 @@ def _attr(obj, *names, default=None):
     return default
 
 
-PAGE_SIZE = 100
-# 10,000 clusters: a bound on a runaway crawl, far above the Polymarket<->Kalshi
-# identity clusters pmxt returned on 2026-09-30.
-MAX_PAGES = 100
+# 25 answered in 1.4 s on 2026-09-30. A request to pmxt's hosted API now and
+# then hangs until a server-side limit and comes back with an empty body
+# ("Expecting value: line 1 column 1") -- 900 s for a 10-cluster page that same
+# afternoon, while the next request returned at once. So each page gets a short
+# socket timeout (set in main) and a few spaced retries; the page size is not
+# what triggers it.
+PAGE_SIZE = 25
+# 10,000 clusters: a bound on a runaway crawl.
+MAX_PAGES = 400
+REQUEST_TIMEOUT_S = 60
+RETRY_DELAYS_S = (5, 15, 45)
 
 
 def _usable_polymarket_ids(config: dict) -> set[str]:
@@ -157,7 +165,15 @@ def _crawl(router, updated_since: str | None):
                   "min_confidence": 0.5, "limit": PAGE_SIZE, "offset": page * PAGE_SIZE}
         if updated_since:
             kwargs["updated_since"] = updated_since
-        batch = router.fetch_matched_market_clusters(**kwargs)
+        for attempt in range(len(RETRY_DELAYS_S) + 1):
+            try:
+                batch = router.fetch_matched_market_clusters(**kwargs)
+                break
+            except Exception as exc:  # noqa: BLE001 -- retried, then re-raised to the caller
+                if attempt == len(RETRY_DELAYS_S):
+                    raise
+                print(f"page {page}: {type(exc).__name__} -- retrying in {RETRY_DELAYS_S[attempt]} s")
+                time.sleep(RETRY_DELAYS_S[attempt])
         print(f"page {page}: {len(batch)} cluster(s)")
         yield from batch
         if len(batch) < PAGE_SIZE:
@@ -188,6 +204,10 @@ def main() -> None:
         return
 
     import pmxt  # deliberately the only import site in this repo -- see module docstring
+
+    # pmxt's Router takes no timeout; its HTTP client falls back to the socket
+    # default, which is "wait forever". See REQUEST_TIMEOUT_S.
+    socket.setdefaulttimeout(REQUEST_TIMEOUT_S)
 
     config = load_config()
     router = pmxt.Router(pmxt_api_key=api_key)

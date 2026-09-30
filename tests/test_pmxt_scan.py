@@ -62,3 +62,27 @@ def test_only_markets_m7_can_forecast_are_usable(tmp_path):
     config = {"universe": {"priority_categories": ["economics", "politics"]},
               "storage": {"db_path": str(tmp_path / "lab.db")}}
     assert scan._usable_polymarket_ids(config) == {"0xecon"}
+
+
+def test_a_page_that_fails_is_retried_before_the_crawl_gives_up(monkeypatch):
+    """pmxt's API now and then hangs and returns an empty body; the next
+    request usually succeeds (2026-09-30: 900 s, then 1.4 s)."""
+    scan = _load()
+    monkeypatch.setattr(scan.time, "sleep", lambda s: None)
+    attempts = []
+
+    class Flaky:
+        def fetch_matched_market_clusters(self, **kw):
+            attempts.append(kw["offset"])
+            if len(attempts) == 1:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return [1, 2, 3]
+
+    crawl = scan._crawl(Flaky(), None)
+    got = []
+    try:
+        while True:
+            got.append(next(crawl))
+    except StopIteration as done:
+        assert done.value is True
+    assert got == [1, 2, 3] and attempts == [0, 0]
