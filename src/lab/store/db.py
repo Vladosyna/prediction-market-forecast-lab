@@ -18,7 +18,7 @@ from lab.util import PROJECT_ROOT, now_utc_iso
 # shape of the database.
 # "15" adds forecasts.days_to_resolution_at_ts (2026-09-25, PAP 9.31).
 # "16" adds resolutions.venue_resolved_ts (2026-09-25).
-SCHEMA_VERSION = "16"
+SCHEMA_VERSION = "17"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -657,6 +657,20 @@ def migrate_venue_resolved_ts(conn: sqlite3.Connection) -> dict[str, bool]:
     return {"venue_resolved_ts": added}
 
 
+def migrate_net_of_cost_growth(conn: sqlite3.Connection) -> dict[str, bool]:
+    """H2's net-of-cost statistic on every eval_runs row (2026-09-30, PAP 9.41):
+    mean over event clusters of the log bankroll multiple of each forecast's
+    cost-inclusive bet, its confidence sequence, and the share of rows whose
+    edge survived the costs. Nullable; rows written before stay NULL."""
+    added = {}
+    for column in ("net_growth", "net_growth_cs_lo", "net_growth_cs_hi", "net_bet_share"):
+        added[column] = not _column_exists(conn, "eval_runs", column)
+        if added[column]:
+            conn.execute(f"ALTER TABLE eval_runs ADD COLUMN {column} REAL")
+    conn.commit()
+    return added
+
+
 def migrate_forecast_horizon(conn: sqlite3.Connection) -> dict[str, bool]:
     """Freeze each forecast's STATED time-to-resolution with it (2026-09-25).
 
@@ -766,6 +780,7 @@ def _apply_schema_and_migrations(conn: sqlite3.Connection) -> None:
     migrate_kalshi_series_cursor(conn)
     migrate_forecast_horizon(conn)
     migrate_venue_resolved_ts(conn)
+    migrate_net_of_cost_growth(conn)
     conn.execute(
         "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", (SCHEMA_VERSION,)
     )

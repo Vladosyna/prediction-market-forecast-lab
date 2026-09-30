@@ -157,6 +157,28 @@ below that, rps stays NULL on the eval_runs row and nothing is shown for it.</p>
 {{ min_bucketed_events }} bucketed events yet.</p>
 {% endif %}
 
+<h2>H2 net of costs (secondary, PAP 9.41)</h2>
+<p class="note">Each scored forecast of the recalibration and structural models in P1/P2 bet on
+its own side at the price a taker pays — the touch plus the venue's taker fee — sized as the
+shadow portfolio sizes a trade (0.2&times; Kelly, 5% cap), held to resolution. <b>net growth</b>
+is the mean log bankroll multiple per event cluster (0 = no edge left after costs; the market
+itself scores exactly 0); <b>bets</b> is the share of forecasts whose edge survived the costs.
+A net-of-cost claim needs the whole confidence sequence above zero.</p>
+{% if h2_rows %}
+<table>
+<tr><th>model</th><th>venue</th><th>category</th><th>window</th><th>clusters</th>
+<th>bets</th><th>net growth</th><th>CS</th></tr>
+{% for r in h2_rows %}
+<tr><td>{{ r.model_id }}</td><td>{{ r.venue }}</td><td>{{ r.category }}</td><td>{{ r.window }}</td>
+<td>{{ r.clusters }}</td><td>{{ "%.2f"|format(r.bet_share) }}</td>
+<td>{{ "%+.5f"|format(r.net_growth) }}</td>
+<td>[{{ "%+.5f"|format(r.cs_lo) }}, {{ "%+.5f"|format(r.cs_hi) }}]</td></tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no scored P1/P2 forecast of an H2 model yet.</p>
+{% endif %}
+
 <h2>Calibration</h2>
 {% if calibration_plot %}<img src="{{ calibration_plot }}" alt="reliability diagram">
 {% else %}<p class="tier-INSUFFICIENT">INSUFFICIENT DATA — no resolved forecasts to plot.</p>{% endif %}
@@ -447,6 +469,18 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         "skill_rps": r["rps_market"] - r["rps"],
     } for r in latest_eval_rows(conn) if r["rps"] is not None]
 
+    # PAP 9.41: H2's net-of-cost statistic, on the rows H2 is about.
+    h2_models = {"m1_debiased", "m1_hier@polymarket", "m1_hier@kalshi", "m5_nowcast"}
+    h2_rows = [{
+        "model_id": r["model_id"], "venue": r["venue"], "category": r["category"],
+        "window": r["window_label"], "clusters": r["n_event_clusters"],
+        "bet_share": r["net_bet_share"], "net_growth": r["net_growth"],
+        "cs_lo": r["net_growth_cs_lo"], "cs_hi": r["net_growth_cs_hi"],
+    } for r in latest_eval_rows(conn)
+        if r["model_id"] in h2_models and r["category"] in ("economics", "weather")
+        and r["window_label"] in ("confirmatory", "all_time")
+        and r.get("net_growth") is not None]
+
     _phase("eval_tables")
     calibration_plot = None
     if bins_by_model:
@@ -565,6 +599,7 @@ def render_report(conn, store, config: dict[str, Any]) -> Path:
         universe_inclusion_rows=universe_inclusion_rows,
         skill_rows=skill_rows,
         rps_rows=rps_rows,
+        h2_rows=h2_rows,
         min_bucketed_events=config["eval"].get("min_bucketed_events", 20),
         pooling_rows=pooling_rows,
         calibration_plot=calibration_plot,

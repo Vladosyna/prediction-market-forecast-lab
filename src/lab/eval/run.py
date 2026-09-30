@@ -20,6 +20,7 @@ import numpy as np
 from lab.eval.anytime import confidence_sequence
 from lab.eval.calibration import calibration_bins
 from lab.eval.distributional import bucketed_events, negrisk_legs
+from lab.eval.net_of_cost import row_growth
 from lab.eval.scoring import brier, paired_rps_skill, paired_skill
 from lab.eval.stratified import precision_weighted_skill
 from lab.store import db as dbmod
@@ -242,6 +243,7 @@ def evaluate_model(
     conn, model_id: str, window_label: str, rows: list[dict], config: dict[str, Any],
     venue: str | None = None, category: str | None = None, window_days: int | None = None,
     legs: dict[str, dict[str, tuple[str, str]]] | None = None,
+    fee_schedule: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     if not rows:
         return None
@@ -264,6 +266,14 @@ def evaluate_model(
     cs = confidence_sequence(
         per_cluster_diffs, alpha=config["eval"]["confidence_sequence"]["alpha"]
     )
+
+    # H2's net-of-cost statistic (PAP 9.41): each row's bet at the taker price
+    # plus the venue fee, sized as §8 sizes a trade; mean over event clusters,
+    # with its own confidence sequence in the same entry order.
+    growth, bet = row_growth(rows, config, fee_schedule)
+    per_cluster_growth = _per_cluster_diffs_in_resolution_order(growth, cluster_ids, order_ts)
+    net_cs = confidence_sequence(
+        per_cluster_growth, alpha=config["eval"]["confidence_sequence"]["alpha"])
 
     stratified = precision_weighted_skill(
         diffs, p_market, cluster_ids, iterations=config["eval"]["bootstrap_iterations"]
@@ -293,8 +303,10 @@ def evaluate_model(
                                log_loss_market, calibration_json,
                                venue, category, skill_pw, skill_pw_ci_lo, skill_pw_ci_hi,
                                n_strata_pw, cs_lo, cs_hi, cs_covers_zero, n_event_clusters,
-                               rps, rps_market)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               rps, rps_market, net_growth, net_growth_cs_lo,
+                               net_growth_cs_hi, net_bet_share)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?)
         """,
         (now_utc_iso(), model_id, window_label, result.n, result.brier_model,
          result.brier_market, result.skill, result.skill_ci_lo, result.skill_ci_hi,
@@ -302,7 +314,8 @@ def evaluate_model(
          venue, category, stratified.skill_pw, stratified.ci_lo, stratified.ci_hi,
          stratified.n_strata, cs.lo, cs.hi, int(cs.covers_zero), result.n_markets,
          rps_result.rps_model if rps_result else None,
-         rps_result.rps_market if rps_result else None),
+         rps_result.rps_market if rps_result else None,
+         float(np.mean(per_cluster_growth)), net_cs.lo, net_cs.hi, float(np.mean(bet))),
     )
     # Commit this row now (2026-09-25). run_eval used to commit once per
     # MODEL, which meant the write transaction opened by this INSERT stayed
@@ -418,6 +431,9 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
 
     nc_ids_by_venue = null_control_ids_by_venue(conn, config)
     legs = negrisk_legs(conn)   # once per run: every RPS statistic reads it
+    from lab.shadow.fees import load_fee_schedule
+
+    fees = load_fee_schedule()  # once per run: every net-of-cost statistic reads it
     model_ids = [r["model_id"] for r in conn.execute(
         "SELECT DISTINCT model_id FROM forecasts ORDER BY model_id"
     ) if models is None or r["model_id"] in models]
@@ -454,6 +470,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                     summary = evaluate_model(
                         conn, model_id, label + label_suffix, rows, config,
                         venue=venue, category=category, window_days=days, legs=legs,
+                        fee_schedule=fees,
                     )
                     if summary:
                         out.append(summary)
@@ -471,6 +488,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                 summary = evaluate_model(
                     conn, model_id, label + label_suffix, rows, config,
                     venue=venue, category=ALL_CATEGORIES, window_days=days, legs=legs,
+                    fee_schedule=fees,
                 )
                 if summary:
                     out.append(summary)
@@ -498,6 +516,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
                             conn, model_id, f"{label}_{tag}_{bucket}" + label_suffix,
                             bucket_rows, config, venue=venue,
                             category=ALL_CATEGORIES, window_days=days, legs=legs,
+                            fee_schedule=fees,
                         )
                         if h_summary:
                             out.append(h_summary)
@@ -523,6 +542,7 @@ def run_eval(conn, config: dict[str, Any], include_disputed: bool = False,
             nc_summary = evaluate_model(
                 conn, model_id, "null_control" + label_suffix, nc_rows, config,
                 venue=venue, category=ALL_CATEGORIES, window_days=None, legs=legs,
+                fee_schedule=fees,
             )
             if nc_summary:
                 out.append(nc_summary)

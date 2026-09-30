@@ -1653,3 +1653,46 @@ sequence measured on 2026-09-25 (about ±0.05 at 268 clusters) by the square roo
 counts gives roughly ±0.02 at that size, against the ±0.035 9.31 projected — a rough projection,
 but enough to say H1 is a test with real power rather than only a bound. 9.31's commitment to also report the sequence as a bound
 on the effect stands; it costs nothing.
+
+**Addendum 9.41 (2026-09-30).** H2's "net of costs" gains a secondary statistic computed on every
+scored forecast, because the proxy §2 named for it will not have data. Registered before any value
+of it has been computed.
+
+**Why.** §2 defines H2's cost adjustment through the shadow portfolio (§8): "the shadow portfolio's
+existing simulated fill/slippage model is the net-of-cost proxy". By 2026-09-30 that portfolio had
+opened 20 trades since July and closed 6. Its entry filter — an M4 edge of at least 0.05, a spread
+of at most 0.03, $500 of depth — almost never fires, so H2's net-of-cost question would reach the
+analysis with nothing to answer it, as 9.7 already anticipated. The shadow portfolio stays as §2
+defines it and is reported at whatever tier its trades earn.
+
+**The statistic.** For every forecast H2 is about — `m1_debiased`, `m1_hier@polymarket`,
+`m1_hier@kalshi` and `m5_nowcast`, in the P1/P2 categories `economics` and `weather` — take the bet
+§8 would take on the model's side and price it as a taker pays: the touch (the forecast's recorded
+mid plus half its recorded spread; all 294,551 such forecasts made since 2026-07-06 carry a spread)
+marked up by the venue's taker fee in force that day under the versioned `data/fee_schedule.yaml`.
+Size it as §8 sizes a trade — 0.2 × Kelly on that cost-inclusive price, capped at 5% of bankroll —
+hold it to resolution, and score the log of the bankroll multiple. When the edge does not survive
+the costs no bet is placed and the forecast scores exactly zero, so the market itself scores zero
+and so does any model that merely agrees with it. The statistic is the mean over event clusters,
+computed on exactly the rows the primary Brier statistic uses (the windows, the exclusions of
+9.17/9.26/9.30, the censoring of 9.35, the analysis instant of 9.40), with the same anytime-valid
+confidence sequence in the same entry order. It is written on every `eval_runs` row (`net_growth`,
+its sequence, and the share of forecasts that placed a bet) and tabulated in the report for H2's
+rows.
+
+**Decision rule (secondary).** H2's net-of-cost claim is supported for a model, venue and category
+when this statistic's confidence sequence at the 9.40 instant lies wholly above zero, in addition to
+H2's Brier-skill leg. Both legs and the shadow portfolio are reported side by side; neither
+replaces the other. As with the Brier statistics, a sequence wholly above zero on the sports null
+control would indicate a harness problem rather than an edge.
+
+**What it leaves out**, stated so it cannot be read as more than it is: slippage beyond the touch (it
+prices the first unit of the bet at the quoted price; §8's depth haircut needs a dollar bankroll,
+which a per-forecast statistic does not have), exposure caps across a category, and compounding —
+each forecast's bet is scored on its own. It is therefore an upper bound on what a real taker could
+have achieved, and a negative or zero result is the more informative outcome.
+
+**What was seen before this was written.** No value of this statistic had been computed. The restore
+drill earlier the same day computed the pooled Brier statistics of three models as of 2026-09-26 to
+check the backup reproduced them; those are the same numbers the nightly evaluation already
+publishes, they are not this statistic, and they were not broken down by category.
