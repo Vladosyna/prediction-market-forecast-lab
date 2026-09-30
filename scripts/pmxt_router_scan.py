@@ -6,11 +6,11 @@ fetch_positions live alongside its read-only Router) whose hosted API key
 can also authorize live trading -- Claude.md's tech-stack row / S12 says it
 must never be imported into src/lab or run by the orchestrator. This script
 is deliberately the ONLY place in this repo that imports pmxt, is run by its
-OWN separate Windows Scheduled Task (see install-pmxt-scan-task.ps1), and
-only ever calls Router's read-only search/matching methods -- never
-create_order, cancel_order, or fetch_balance.
+OWN separate scheduled unit (pmxt-scan.timer on the VPS), and only ever calls
+Router's read-only matching method -- never create_order, cancel_order, or
+fetch_balance.
 
-Run with:  uv run --with pmxt python scripts/pmxt_router_scan.py [--full]
+Run with:  uv run --with pmxt python scripts/pmxt_router_scan.py [--full | --batch N]
 `uv run --with` installs pmxt into an ephemeral/cached environment for this
 one invocation only -- pyproject.toml is never touched, so pmxt never
 becomes part of this project's own declared dependency tree (the concern
@@ -22,36 +22,27 @@ Output: data/pmxt_candidates.json, a plain list of
 relation_type, confidence, scanned_ts}. This file is read-only input to
 lab.models.m7_crossvenue.verify_pmxt_candidates, which is the only code
 path that ever writes into data/markets_map.yaml -- nothing here is
-auto-confirmed; a human still runs `lab map confirm`.
+auto-confirmed; a human still runs `lab map confirm`. New candidates are
+added to whatever the file already holds, so a scan landing before the last
+one's candidates were verified cannot erase them.
 
-What it reads (2026-09-30): every Polymarket<->Kalshi "identity" cluster pmxt
-holds, page by page, rather than the ~20 short keyword searches it used to
-run at 20 clusters each. Those searches were a workaround for pmxt ignoring
-descriptive phrases; with the watermark below they also meant a cluster was
-seen once and never again, and new confirmed pairs fell from 123 in July to
-21 in September while Kalshi's universe grew from ~285 to 1,317 live series.
-Only pairs whose Polymarket leg is in this lab's own open, snapshotted
-universe in a priority category become candidates -- the markets M7 can
-actually forecast; the rest would cost an LLM check and a human review for a
-pair nothing could use.
+What it asks (2026-09-30): for each Polymarket market M7 could use -- open, in
+a snapshotted tier, in a priority category -- that has no Kalshi pair yet,
+pmxt's identity matches for that one market, by its slug. Until then the scan
+ran ~20 fixed keyword searches at 20 clusters each behind an `updated_since`
+watermark, so a cluster was seen once and never again: new confirmed pairs
+fell from 123 in July to 21 in September while Kalshi's universe grew to 1,317
+live series, and the 05:00 scan that day wrote nothing. A query-less crawl of
+every identity cluster was tried the same afternoon and abandoned: pmxt served
+the first page in 1.4 s and then held deeper pages until a server-side limit
+(900 s) and an empty body. A lookup by slug answered in 0.8-2.2 s and returned
+exactly the recorded Kalshi ticker for three known pairs.
 
-Two independent ways this script avoids re-spending pmxt API calls (and
-downstream LLM verification calls) on pairs already handled: (1)
-data/pmxt_scan_state.json tracks the timestamp of the last successful scan
-and passes it as `updated_since`, so pmxt itself only returns clusters it has
-touched since then (`--full` ignores it for a one-off complete pass); (2)
-candidates already present in data/markets_map.yaml's `confirmed` or
-`proposed` lists are filtered out before being written to the output file at
-all, regardless of what pmxt returns.
-
-NOTE ON FIELD NAMES: pmxt's exact Router response schema (attribute names on
-its Market/Cluster objects) was assembled from partial public docs and could
-not be live-tested from the assistant session that wrote this script (the
-same "run out-of-band, by a human" boundary this script exists to respect
-also blocked testing it inline). On first real run, if you see a message
-starting "pmxt schema mismatch", paste the printed raw object dump back for
-a quick field-name fix -- the script is written to fail loud with that dump
-rather than silently write wrong or empty candidates.
+Each market's last lookup is kept in data/pmxt_lookup_state.json, stamped
+whether or not the lookup succeeded -- ordering on successes alone is how the
+lab's resolution watchers and series rotation wedged, one after another. Never
+looked-up markets go first, then the longest ago; a timed run takes a batch,
+`--full` takes them all.
 """
 
 from __future__ import annotations
@@ -59,9 +50,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,32 +68,57 @@ from lab.models.m7_crossvenue import load_markets_map  # noqa: E402
 from lab.util import load_config  # noqa: E402
 
 OUTPUT_PATH = REPO_ROOT / "data" / "pmxt_candidates.json"
-STATE_PATH = REPO_ROOT / "data" / "pmxt_scan_state.json"
+LOOKUP_STATE_PATH = REPO_ROOT / "data" / "pmxt_lookup_state.json"
+
+# Markets per timed run (twice a day): a full pass over ~2,100 usable markets
+# in under four days at ~3 s a lookup, ~15 minutes a run.
+DEFAULT_BATCH = 300
+# pmxt's Router takes no timeout and its client will wait out the server's own
+# 900-second hold; a lookup gets this long on a worker thread, then is
+# abandoned. A run stops after this many in a row, since the API is then down.
+LOOKUP_TIMEOUT_S = 60
+MAX_CONSECUTIVE_TIMEOUTS = 5
+PACING_S = 1.5
 
 
-def _load_last_scan_ts() -> str | None:
-    if not STATE_PATH.exists():
-        return None
-    try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8")).get("last_scan_ts")
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _save_last_scan_ts(ts: str) -> None:
-    STATE_PATH.write_text(json.dumps({"last_scan_ts": ts}), encoding="utf-8")
-
-
-def _known_pairs() -> set[tuple[str, str]]:
-    """(condition_id, external_id) pairs already confirmed or proposed --
-    from ANY source, not just pmxt. Skipping these here saves an LLM
-    verification call downstream and keeps the candidates file focused on
-    genuinely new suggestions; updated_since (below) already does most of
-    the work of not re-fetching unchanged pmxt matches in the first place."""
+def _known_pairs() -> tuple[set[tuple[str, str]], set[str]]:
+    """((condition_id, external_id) pairs, condition_ids) already confirmed or
+    proposed with Kalshi -- from ANY source, not just pmxt. A market that has
+    one is not looked up again, and a pair already listed is never re-proposed."""
     data = load_markets_map()
-    return {(e["condition_id"], e["external_id"])
-           for e in data.get("confirmed", []) + data.get("proposed", [])
-           if e.get("venue") == "kalshi"}
+    entries = [e for e in data.get("confirmed", []) + data.get("proposed", [])
+               if e.get("venue") == "kalshi"]
+    return ({(e["condition_id"], e["external_id"]) for e in entries},
+            {e["condition_id"] for e in entries})
+
+
+def _usable_polymarket_markets(config: dict) -> dict[str, str]:
+    """{condition_id: slug} for Polymarket markets M7 can forecast: open, in a
+    snapshotted tier, in a priority category (Phase 9: "priority categories
+    only"). Read-only."""
+    priority = set(config["universe"]["priority_categories"])
+    db_path = REPO_ROOT / config["storage"]["db_path"]
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return {cid: slug for cid, slug, category in conn.execute(
+            "SELECT condition_id, slug, category FROM markets "
+            "WHERE COALESCE(venue, 'polymarket') = 'polymarket' AND active = 1 AND closed = 0 "
+            "AND tier IN ('liquid', 'tail') AND slug IS NOT NULL") if category in priority}
+    finally:
+        conn.close()
+
+
+def _lookup_order(usable: dict[str, str], paired: set[str], state: dict[str, str]) -> list[str]:
+    """Condition ids to look up, never-looked-up first, then oldest lookup."""
+    todo = [cid for cid in usable if cid not in paired]
+    return sorted(todo, key=lambda cid: (state.get(cid) is not None, state.get(cid) or "", cid))
+
+
+def _load_json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+    except (json.JSONDecodeError, OSError):
+        return default
 
 
 def _attr(obj, *names, default=None):
@@ -124,64 +140,6 @@ def _attr(obj, *names, default=None):
     return default
 
 
-# 25 answered in 1.4 s on 2026-09-30. A request to pmxt's hosted API now and
-# then hangs until a server-side limit and comes back with an empty body
-# ("Expecting value: line 1 column 1") -- 900 s for a 10-cluster page that same
-# afternoon, while the next request returned at once. So each page gets a short
-# socket timeout (set in main) and a few spaced retries; the page size is not
-# what triggers it.
-PAGE_SIZE = 25
-# 10,000 clusters: a bound on a runaway crawl.
-MAX_PAGES = 400
-REQUEST_TIMEOUT_S = 60
-RETRY_DELAYS_S = (5, 15, 45)
-
-
-def _usable_polymarket_ids(config: dict) -> set[str]:
-    """Polymarket markets M7 can forecast: open, in a snapshotted tier, in a
-    priority category (Phase 9: "priority categories only"). Read-only."""
-    priority = set(config["universe"]["priority_categories"])
-    db_path = REPO_ROOT / config["storage"]["db_path"]
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        return {cid for cid, category in conn.execute(
-            "SELECT condition_id, category FROM markets "
-            "WHERE COALESCE(venue, 'polymarket') = 'polymarket' AND active = 1 AND closed = 0 "
-            "AND tier IN ('liquid', 'tail')") if category in priority}
-    finally:
-        conn.close()
-
-
-def _crawl(router, updated_since: str | None):
-    """Every Polymarket<->Kalshi identity cluster, a page at a time.
-    Yields clusters; returns True only if the crawl reached its end."""
-    for page in range(MAX_PAGES):
-        if page:
-            # Polite pacing (brief guardrail 4, extended to pmxt's own API):
-            # back-to-back calls produced empty-body failures in first-run
-            # testing, consistent with a rate limit on pmxt's side.
-            time.sleep(1.5)
-        kwargs = {"relation": "identity", "venues": "polymarket,kalshi", "min_venues": 2,
-                  "min_confidence": 0.5, "limit": PAGE_SIZE, "offset": page * PAGE_SIZE}
-        if updated_since:
-            kwargs["updated_since"] = updated_since
-        for attempt in range(len(RETRY_DELAYS_S) + 1):
-            try:
-                batch = router.fetch_matched_market_clusters(**kwargs)
-                break
-            except Exception as exc:  # noqa: BLE001 -- retried, then re-raised to the caller
-                if attempt == len(RETRY_DELAYS_S):
-                    raise
-                print(f"page {page}: {type(exc).__name__} -- retrying in {RETRY_DELAYS_S[attempt]} s")
-                time.sleep(RETRY_DELAYS_S[attempt])
-        print(f"page {page}: {len(batch)} cluster(s)")
-        yield from batch
-        if len(batch) < PAGE_SIZE:
-            return True
-    print(f"stopped at MAX_PAGES={MAX_PAGES}; the next scan continues from the watermark")
-    return False
-
-
 def _dump(obj) -> str:
     """Best-effort raw repr for diagnosing an unknown pmxt object shape."""
     if hasattr(obj, "__dict__"):
@@ -193,10 +151,72 @@ def _dump(obj) -> str:
     return repr(obj)
 
 
+def _with_timeout(fn, timeout_s: float):
+    """(finished, result, error) for fn() run on a daemon thread; a call still
+    running after timeout_s is abandoned rather than waited for."""
+    box: dict = {}
+
+    def run():
+        try:
+            box["result"] = fn()
+        except Exception as exc:  # noqa: BLE001 -- reported to the caller
+            box["error"] = exc
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout_s)
+    if t.is_alive():
+        return False, None, None
+    return True, box.get("result"), box.get("error")
+
+
+def _candidate(cluster, now_iso: str) -> dict | None:
+    """The Polymarket<->Kalshi pair in one identity cluster, as a candidate row."""
+    confidence = _attr(cluster, "confidence", "score", default=0.0)
+    cluster_markets = _attr(cluster, "markets", default=[]) or []
+    poly = next((m for m in cluster_markets
+                 if (_attr(m, "source_exchange", "venue", default="") or "").lower() == "polymarket"),
+                None)
+    kalshi = next((m for m in cluster_markets
+                   if (_attr(m, "source_exchange", "venue", default="") or "").lower() == "kalshi"),
+                  None)
+    if poly is None or kalshi is None:
+        return None
+    # Both confirmed from a real run's raw dump: contract_address is
+    # Polymarket's conditionId; Kalshi objects leave contract_address None but
+    # carry the venue ticker in `slug` (Polymarket's own `slug` is a URL slug).
+    poly_condition_id = _attr(poly, "contract_address", "market_id")
+    poly_question = _attr(poly, "title", "question", "name")
+    kalshi_ticker = _attr(kalshi, "slug", "contract_address", "market_id")
+    if poly_condition_id is None or poly_question is None or kalshi_ticker is None:
+        print(f"pmxt schema mismatch on a cluster market object: "
+              f"poly={_dump(poly)} kalshi={_dump(kalshi)}")
+        return None
+    # Kalshi's market-level `title` is the broad EVENT question ("Who will win
+    # the next presidential election?"); the outcome it resolves on lives in
+    # the outcome labels. Sending the title alone made the downstream LLM check
+    # reject every candidate it saw -- correctly, on that evidence (2026-07-28).
+    kalshi_outcomes = [lbl for lbl in (_attr(o, "label", "name", "title")
+                                       for o in (_attr(kalshi, "outcomes", default=[]) or []))
+                       if lbl]
+    return {
+        "poly_condition_id": str(poly_condition_id),
+        "poly_question": poly_question,
+        "kalshi_ticker": str(kalshi_ticker),
+        "kalshi_title": _attr(kalshi, "title", "question", "name", default=""),
+        "kalshi_outcomes": kalshi_outcomes,
+        "kalshi_description": _attr(kalshi, "description", default=None),
+        "relation_type": "identity",
+        "confidence": float(confidence),
+        "scanned_ts": now_iso,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--full", action="store_true",
-                        help="ignore the watermark: re-read every identity cluster pmxt holds")
+    parser.add_argument("--full", action="store_true", help="look up every usable market")
+    parser.add_argument("--batch", type=int, default=DEFAULT_BATCH,
+                        help="markets to look up this run (ignored with --full)")
     args = parser.parse_args()
     api_key = os.environ.get("PMXT_API_KEY", "").strip()
     if not api_key:
@@ -205,140 +225,64 @@ def main() -> None:
 
     import pmxt  # deliberately the only import site in this repo -- see module docstring
 
-    # pmxt's Router takes no timeout; its HTTP client falls back to the socket
-    # default, which is "wait forever". See REQUEST_TIMEOUT_S.
-    socket.setdefaulttimeout(REQUEST_TIMEOUT_S)
-
     config = load_config()
     router = pmxt.Router(pmxt_api_key=api_key)
+    known_pairs, paired_markets = _known_pairs()
+    usable = _usable_polymarket_markets(config)
+    state: dict[str, str] = _load_json(LOOKUP_STATE_PATH, {})
+    order = _lookup_order(usable, paired_markets, state)
+    batch = order if args.full else order[:max(0, args.batch)]
+    print(f"usable Polymarket markets {len(usable)}, already paired {len(paired_markets & set(usable))}, "
+          f"to look up {len(order)}, this run {len(batch)}")
 
-    known_pairs = _known_pairs()
-    usable = _usable_polymarket_ids(config)
-    last_scan_ts = None if args.full else _load_last_scan_ts()
-    if last_scan_ts:
-        print(f"updated_since={last_scan_ts} ({len(known_pairs)} pair(s) already known, will be skipped)")
-    else:
-        print(f"no prior scan state -- full scan ({len(known_pairs)} pair(s) already known, will be skipped)")
-
-    candidates: list[dict] = []
-    seen_pairs: set[tuple[str, str]] = set()
+    existing = _load_json(OUTPUT_PATH, [])
+    have = {(c["poly_condition_id"], c["kalshi_ticker"]) for c in existing}
+    candidates = list(existing)
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    skipped_known = 0
+    looked = timeouts_in_row = failures = matched_markets = 0
 
-    # Diagnostics -- printed regardless of outcome so a 0-candidate run is
-    # distinguishable from "the schema guesses are all wrong and everything
-    # got silently filtered out before ever reaching a schema-mismatch check".
-    total_clusters = 0
-    skipped_outside_universe = 0
-    dumped_cluster_sample = False
-    dumped_poly_kalshi_pair = False
-
-    complete = False
-    crawl = _crawl(router, last_scan_ts)
-    while True:
-        try:
-            cluster = next(crawl)
-        except StopIteration as done:
-            complete = bool(done.value)
-            break
-        except Exception as exc:  # noqa: BLE001 -- keep what was read, keep the old watermark
-            print(f"fetch_matched_market_clusters failed mid-crawl: {exc}")
-            break
-        total_clusters += 1
-        if not dumped_cluster_sample:
-            print(f"sample cluster object (first one seen): {_dump(cluster)}")
-            dumped_cluster_sample = True
-        confidence = _attr(cluster, "confidence", "score", default=0.0)
-        cluster_markets = _attr(cluster, "markets", default=[]) or []
-
-        poly = next((mkt for mkt in cluster_markets
-                    if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "polymarket"),
-                   None)
-        kalshi = next((mkt for mkt in cluster_markets
-                      if (_attr(mkt, "source_exchange", "venue", default="") or "").lower() == "kalshi"),
-                     None)
-        if poly is None or kalshi is None:
-            continue  # cluster matched, but not a Polymarket<->Kalshi pair
-
-        if not dumped_poly_kalshi_pair:
-            # Print unconditionally, not just on a None-mismatch: contract_address
-            # is CONFIRMED as Polymarket's conditionId, but NOT confirmed as
-            # Kalshi's ticker -- the MarketOutcome schema separately documents
-            # "Market Ticker for Kalshi" living on outcome_id, one level down,
-            # which may mean the market-level ticker is elsewhere entirely
-            # (slug? source_metadata?). Seeing the real values side by side is
-            # the only way to resolve this rather than guessing again.
-            print(f"first Polymarket<->Kalshi pair found -- poly={_dump(poly)}")
-            print(f"                                          kalshi={_dump(kalshi)}")
-            dumped_poly_kalshi_pair = True
-
-        # Both confirmed from a real run's raw dump: contract_address is
-        # Polymarket's conditionId (e.g. '0xe017...'); Kalshi objects
-        # leave contract_address None entirely, but populate `slug` with
-        # the real venue ticker (e.g. 'KXPRESPERSON-28-NHAL') -- Polymarket's
-        # own `slug` is a URL slug, not useful, so this priority order is
-        # deliberately different per venue rather than one shared list.
-        poly_condition_id = _attr(poly, "contract_address", "market_id")
-        poly_question = _attr(poly, "title", "question", "name")
-        kalshi_ticker = _attr(kalshi, "slug", "contract_address", "market_id")
-        kalshi_title = _attr(kalshi, "title", "question", "name", default="")
-        if poly_condition_id is None or poly_question is None or kalshi_ticker is None:
-            print(f"pmxt schema mismatch on a cluster market object: "
-                 f"poly={_dump(poly)} kalshi={_dump(kalshi)}")
+    for i, cid in enumerate(batch):
+        if i:
+            time.sleep(PACING_S)   # polite pacing (brief guardrail 4, extended to pmxt's API)
+        finished, clusters, error = _with_timeout(
+            lambda slug=usable[cid]: router.fetch_matched_market_clusters(
+                slug=slug, relation="identity", venues="polymarket,kalshi"),
+            LOOKUP_TIMEOUT_S)
+        state[cid] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        looked += 1
+        if not finished:
+            timeouts_in_row += 1
+            failures += 1
+            print(f"{cid[:12]}: no answer in {LOOKUP_TIMEOUT_S} s")
+            if timeouts_in_row >= MAX_CONSECUTIVE_TIMEOUTS:
+                print(f"{timeouts_in_row} lookups in a row timed out -- pmxt looks down, stopping")
+                break
             continue
-
-        key = (str(poly_condition_id), str(kalshi_ticker))
-        if key in seen_pairs:
+        timeouts_in_row = 0
+        if error is not None:
+            failures += 1
+            print(f"{cid[:12]}: {type(error).__name__}: {str(error)[:80]}")
             continue
-        seen_pairs.add(key)
-        if key[0] not in usable:
-            skipped_outside_universe += 1
-            continue
-        if key in known_pairs:
-            # Already confirmed or already sitting in `proposed` (from
-            # pmxt or the LLM path) -- skip so the candidates file, and
-            # the LLM verification pass that consumes it, both stay
-            # focused on genuinely new suggestions.
-            skipped_known += 1
-            continue
-        # Kalshi's market-level `title` is the broad EVENT question
-        # ("Who will win the next presidential election?"); the outcome it
-        # actually resolves on lives in the ticker suffix and the outcome
-        # labels ("Nikki Haley" / "Not Nikki Haley"). Sending the title
-        # alone made the downstream LLM check reject every candidate it
-        # ever saw -- correctly, on the evidence it was given (2026-07-28).
-        kalshi_outcomes = [
-            lbl for lbl in (
-                _attr(o, "label", "name", "title")
-                for o in (_attr(kalshi, "outcomes", default=[]) or [])
-            ) if lbl
-        ]
-        candidates.append({
-            "poly_condition_id": str(poly_condition_id),
-            "poly_question": poly_question,
-            "kalshi_ticker": str(kalshi_ticker),
-            "kalshi_title": kalshi_title,
-            "kalshi_outcomes": kalshi_outcomes,
-            "kalshi_description": _attr(kalshi, "description", default=None),
-            "relation_type": "identity",
-            "confidence": float(confidence),
-            "scanned_ts": now_iso,
-        })
+        found = False
+        for cluster in clusters or []:
+            cand = _candidate(cluster, now_iso)
+            if cand is None or cand["poly_condition_id"] != cid:
+                continue
+            key = (cand["poly_condition_id"], cand["kalshi_ticker"])
+            if key in known_pairs or key in have:
+                continue
+            have.add(key)
+            candidates.append(cand)
+            found = True
+        matched_markets += found
+        if looked % 50 == 0:
+            LOOKUP_STATE_PATH.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
 
-    print(f"diagnostics: total_clusters_seen={total_clusters} skipped_already_known={skipped_known} "
-          f"skipped_outside_universe={skipped_outside_universe} usable_polymarket={len(usable)}")
-
+    LOOKUP_STATE_PATH.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(candidates, indent=2), encoding="utf-8")
-    print(f"wrote {len(candidates)} candidate(s) to {OUTPUT_PATH}")
-
-    # Only advance the watermark after a fully successful pass -- if this run
-    # crashed partway through, the next run should still see everything from
-    # last_scan_ts onward rather than silently skipping whatever it missed.
-    if complete:
-        _save_last_scan_ts(now_iso)
-    else:
-        print("crawl incomplete -- watermark left where it was")
+    print(f"looked up {looked} market(s), {failures} failed, {matched_markets} with a new Kalshi match; "
+          f"{len(candidates) - len(existing)} new candidate(s), {len(candidates)} in {OUTPUT_PATH.name}")
 
 
 if __name__ == "__main__":
