@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import sys
+from pathlib import Path
 
 import typer
 
@@ -368,6 +369,51 @@ def verify_ledger_cmd() -> None:
         typer.echo(f"  UNVERIFIED DATES: {', '.join(result['dates_unverified'])}")
         raise typer.Exit(code=1)
     typer.echo("  OK -- every date has a verifying commitment")
+
+
+@app.command("restore")
+def restore_cmd(
+    from_dir: Path = typer.Option(..., "--from",
+                                  help="The results mirror (a clone of the private backup repo)."),
+    to: Path = typer.Option(..., "--to", help="Path for the NEW database; never overwritten."),
+) -> None:
+    """Rebuild a database from the results mirror, then check it (restore drill).
+
+    Loads the mirrored ledger (forecasts, resolutions, evidence runs, original
+    ids) and the reference tables, checks every mirrored day against its
+    manifest digest and row count, and recomputes every public ledger
+    commitment against the restored rows. Exits non-zero if any file fails
+    its digest or count, or any committed date cannot be verified.
+    """
+    from lab.ledger_commitment import verify_ledger
+    from lab.restore import restore_from_mirror
+    from lab.store import db
+    from lab.util import PROJECT_ROOT
+
+    report = restore_from_mirror(from_dir, to)
+    typer.echo(f"restored into {to}")
+    for table, n in report["rows"].items():
+        typer.echo(f"  {table}: {n} rows")
+    typer.echo(f"  resolutions skipped (no market in the reference set): "
+               f"{report['orphan_resolutions']}")
+    for key in ("digest_mismatch", "row_count_mismatch", "unlisted_files"):
+        for item in report[key]:
+            typer.echo(f"  {key}: {item}")
+
+    config = load_config()
+    path = PROJECT_ROOT / config.get("ledger", {}).get(
+        "commitments_path", "docs/ledger_commitments.jsonl")
+    conn = db.connect(to)
+    try:
+        result = verify_ledger(conn, path)
+    finally:
+        conn.close()
+    typer.echo(f"  ledger commitments: {result['dates_verified']} of {result['dates']} dates "
+               f"verify against the restored rows")
+    if result["dates_unverified"]:
+        typer.echo(f"  UNVERIFIED DATES: {', '.join(result['dates_unverified'])}")
+    if report["digest_mismatch"] or report["row_count_mismatch"] or result["dates_unverified"]:
+        raise typer.Exit(code=1)
 
 
 @app.command()
