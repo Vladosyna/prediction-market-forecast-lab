@@ -283,7 +283,9 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
 
     async def job_kalshi_resolutions() -> None:
         if not is_paused(config):
-            await watch_kalshi_resolutions(kalshi, conn)
+            await watch_kalshi_resolutions(
+                kalshi, conn,
+                limit=config["venues"]["kalshi"].get("resolution_backlog_limit", 200))
 
     async def job_metaculus_snapshot() -> None:
         if not is_paused(config):

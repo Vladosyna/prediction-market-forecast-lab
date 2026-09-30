@@ -722,20 +722,29 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
         [(stamp, r["condition_id"]) for r in candidates],
     )
     conn.commit()
+    # Market objects ~100 to a request, finalized ones included (verified live
+    # 2026-09-30: status, result and settlement_ts all present), instead of one
+    # request per candidate. At one request each the watcher could not keep up
+    # with a sports day: on 2026-09-30 its backlog held 8,265 markets, 7,617 of
+    # them never checked, 6,998 of them sports listings that had closed on the
+    # 29th and 30th -- while it worked through 200 per half hour. Anything a
+    # bulk response omits is fetched singly, exactly as before.
+    prefetched = await _prefetch_markets(
+        kalshi, [r["venue_native_id"] for r in candidates], asyncio.Semaphore(4))
     for row in candidates:
         condition_id, ticker = row["condition_id"], row["venue_native_id"]
-        try:
-            m = await kalshi.market(ticker)
-        except Exception:
-            log.warning("kalshi resolutions: fetch failed",
-                        extra={"ctx": {"condition_id": condition_id}})
-            continue
+        m = prefetched.get(ticker)
         if m is None:
-            conn.commit()
+            try:
+                m = await kalshi.market(ticker)
+            except Exception:
+                log.warning("kalshi resolutions: fetch failed",
+                            extra={"ctx": {"condition_id": condition_id}})
+                continue
+        if m is None:
             continue
         payout_yes = extract_kalshi_payout(m)
         if payout_yes is None:
-            conn.commit()
             continue
         db.record_resolution(
             conn, condition_id,
@@ -746,8 +755,11 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
             venue_resolved_ts=parse_venue_ts(m.settlement_ts),
         )
         recorded += 1
-        # Commit per-candidate: avoids holding one long write transaction open
-        # across a large backlog scan (same rationale as resolutions.py).
+        # Commit in batches: the scan no longer waits on the network between
+        # candidates, so a write transaction here stays short either way.
+        if recorded % 100 == 0:
+            conn.commit()
+    if conn.in_transaction:
         conn.commit()
     if recorded:
         log.info("kalshi resolutions recorded", extra={"ctx": {"count": recorded}})

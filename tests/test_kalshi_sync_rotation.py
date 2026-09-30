@@ -273,3 +273,34 @@ def test_the_watchers_stamp_a_batch_in_one_transaction(conn):
         "SELECT COUNT(*) FROM markets WHERE resolution_checked_ts IS NOT NULL"
     ).fetchone()[0]
     assert stamped == len(cids), "every candidate rotates even when every fetch fails"
+
+
+def test_the_watcher_fetches_its_candidates_in_bulk(conn):
+    """One request per candidate could not keep up with a sports day: 8,265
+    in the backlog on 2026-09-30, 7,617 never checked, at 200 a half hour.
+    Finalized markets come back ~100 to a bulk request; only what a bulk
+    response omits is fetched singly."""
+    past = "2026-01-01T00:00:00+00:00"
+    tickers = [f"S{i}-T1" for i in range(5)]
+    for t in tickers:
+        _seed(conn, t, end_date=past)
+    conn.commit()
+    singles: list[str] = []
+
+    class _Bulk:
+        async def markets_by_tickers(self, part):
+            return {t: KalshiMarket.model_validate({
+                "ticker": t, "status": "finalized", "result": "yes",
+                "settlement_ts": "2026-01-02T00:00:00Z"}) for t in part if t != "S4-T1"}
+
+        async def market(self, ticker):
+            singles.append(ticker)
+            return KalshiMarket.model_validate({"ticker": ticker, "status": "finalized",
+                                                "result": "no"})
+
+    assert asyncio.run(watch_kalshi_resolutions(_Bulk(), conn)) == 5
+    assert singles == ["S4-T1"], "only the ticker the bulk response omitted"
+    payouts = {r["condition_id"]: r["payout_yes"] for r in conn.execute(
+        "SELECT condition_id, payout_yes FROM resolutions")}
+    assert payouts[db.venue_condition_id("kalshi", "S0-T1")] == 1.0
+    assert payouts[db.venue_condition_id("kalshi", "S4-T1")] == 0.0

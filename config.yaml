@@ -503,6 +503,10 @@ venues:
     # already-permitted rate a latency-bound round can actually reach.
     snapshot_concurrency: 8
     resolution_poll_minutes: 30
+    # Candidates per watcher cycle. 200 was sized for one request each; the
+    # watcher now fetches ~100 markets per request (2026-09-30), so 2,000 is
+    # ~20 requests a cycle -- and a sports day closes several thousand markets.
+    resolution_backlog_limit: 2000
     rate_limit:
       requests_per_second: 8   # brief section 3: Kalshi tolerates ~10 req/s; stay under it
       burst: 16
