@@ -628,3 +628,62 @@ def test_kalshi_backfill_never_touches_polymarket_or_existing_links(tmp_path):
     assert conn.execute("SELECT event_id FROM markets WHERE condition_id=?",
                         ("kalshi:KXA-26-X",)).fetchone()[0] == "evt_preexisting"
     conn.close()
+
+
+def test_the_liquid_round_rotates_its_ladders(tmp_path):
+    """One order-book request per liquid market made the round 5m20s against
+    a 5-minute interval; every second firing was skipped and at the 02:00
+    freeze on 2026-09-30 the whole liquid tier was 3 s past guardrail 13's
+    15-minute bound. Each round now fetches ladders for one market in N, and
+    every market's turn comes exactly once in N rounds; prices still every round."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from lab.api.kalshi import KalshiMarket
+    from lab.collect.kalshi_collector import _ladder_turn, snapshot_kalshi
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore
+
+    ids = [f"kalshi:T{i}" for i in range(300)]
+    start = datetime(2026, 9, 30, 1, 45, tzinfo=timezone.utc)
+    turns = {cid: 0 for cid in ids}
+    for k in range(3):
+        bucket = (start + timedelta(minutes=5 * k)).isoformat(timespec="seconds")
+        chosen = [cid for cid in ids if _ladder_turn(cid, bucket, 5, 3)]
+        assert 60 < len(chosen) < 140, "roughly a third of the tier per round"
+        for cid in chosen:
+            turns[cid] += 1
+    assert set(turns.values()) == {1}, "every market exactly once per N rounds"
+
+    conn = db.connect(tmp_path / "lab.db")
+    for i in range(30):
+        db.upsert_market(conn, {
+            "condition_id": f"kalshi:T{i}", "venue": "kalshi", "venue_native_id": f"T{i}",
+            "slug": f"t{i}", "question": "Q?", "category": "economics", "description": "d",
+            "end_date_iso": "2027-01-01T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+            "neg_risk": 0, "active": 1, "closed": 0, "liquidity_num": 1.0, "volume_num": 1.0,
+            "tier": "liquid",
+        })
+    conn.commit()
+    books: list[str] = []
+
+    class _Client:
+        async def market(self, ticker):
+            return KalshiMarket.model_validate({
+                "ticker": ticker, "yes_bid_dollars": "0.40", "yes_ask_dollars": "0.42",
+                "yes_bid_size_fp": "100", "yes_ask_size_fp": "200", "volume_fp": "1",
+            })
+
+        async def orderbook(self, ticker):
+            books.append(ticker)
+            return None
+
+    cfg = {"venues": {"kalshi": {"snapshot_interval_minutes": {"liquid": 5, "tail": 30},
+                                 "snapshot_concurrency": 4, "ladder_every_n_rounds": 3}},
+           "collect": {"book_depth_levels": 10},
+           "universe": {"null_control": {"category": "sports", "sample_size": 30,
+                                         "random_seed": 42, "snapshot_unsampled": False}}}
+    store = SnapshotStore(tmp_path / "snapshots")
+    assert asyncio.run(snapshot_kalshi(_Client(), conn, store, cfg, tier="liquid")) == 30
+    assert 0 < len(books) < 30
+    conn.close()

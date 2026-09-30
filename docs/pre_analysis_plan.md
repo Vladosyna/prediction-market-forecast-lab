@@ -1592,3 +1592,20 @@ forecast from any model that day (855 distinct markets against ~1,500). A market
 the pass falls on a later UTC day than its last forecast, subject to the same six-hour minimum
 spacing the price-move trigger uses (9.5), so a late-evening catch-up and the next morning's pass
 still cannot both write. Normal operation is unchanged.
+
+**Addendum 9.39 (2026-09-30).** A one-day loss of most of Kalshi's liquid tier, disclosed; no
+exclusion window. Kalshi's liquid snapshot round fetched a full order-book ladder for every liquid
+market, one request each; as the tier grew to 2,516 snapshotted markets the round took 5m20s against
+its 5-minute interval, APScheduler skipped every second firing, and each snapshot is stamped with its
+round's start rounded down to the interval. At the 02:00 freeze on 2026-09-30 the newest complete
+liquid snapshot was therefore 15m03s old — three seconds past guardrail 13's bound — for the whole
+tier: 2,510 markets were skipped as stale, and Kalshi's distinct forecast markets fell from 6,669
+(09-29) to 5,663, the liquid tier from 1,650 to 77. The guardrail did what it is for: no forecast was
+paired against a stale price. From 2026-09-30 each liquid round fetches ladders for one market in
+three, rotating, so every market's ladder is refreshed every 15 minutes while its price and
+top-of-book depth still arrive every 5; the round falls to about two minutes. No price, covariate or
+statistic in this plan reads the ladder, so nothing scored changes. No exclusion window is declared:
+the markets lost are a whole tier, a forecast-time property rather than anything the outcome
+decides; that day's tail-tier forecasts are complete; and the lost markets are forecast on the days
+either side. A sensitivity analysis that drops Kalshi rows with `forecast_ts` on 2026-09-30 needs
+nothing beyond the export.

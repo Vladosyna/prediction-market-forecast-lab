@@ -490,6 +490,14 @@ venues:
     snapshot_interval_minutes:
       liquid: 5
       tail: 30
+    # The liquid round fetches the full order-book ladder for one market in N,
+    # rotating, so each market's ladder is refreshed every N rounds (15 minutes
+    # at N=3) while its price and top-of-book depth still arrive every round
+    # (2026-09-30). One ladder request per market for all 2,516 liquid markets
+    # made the round 5m20s against its 5-minute interval, every second firing
+    # was skipped, and at the 02:00 freeze on 09-30 the whole liquid tier was
+    # 3 seconds past guardrail 13's 15-minute bound. 1 = the old behaviour.
+    ladder_every_n_rounds: 3
     # In-flight requests per round. The TokenBucket still caps the RATE, so
     # guardrail 8 holds regardless -- this only decides how much of the
     # already-permitted rate a latency-bound round can actually reach.

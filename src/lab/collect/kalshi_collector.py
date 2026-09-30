@@ -34,6 +34,7 @@ import json
 import logging
 from typing import Any, Callable
 
+from lab.api.http import describe_error
 from lab.api.kalshi import KalshiClient, KalshiMarket
 from lab.collect.categories import load_categories
 from lab.store import db
@@ -450,9 +451,9 @@ async def _prefetch_markets(kalshi, tickers: list[str], sem: asyncio.Semaphore
         async with sem:
             try:
                 return await bulk(part)
-            except Exception:
+            except Exception as exc:
                 log.warning("kalshi snapshot: bulk fetch failed -- falling back per market",
-                            extra={"ctx": {"tickers": len(part)}})
+                            extra={"ctx": {"tickers": len(part), "error": describe_error(exc)}})
                 return {}
 
     out: dict[str, KalshiMarket] = {}
@@ -465,6 +466,7 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
                                  markets: list[dict], ts_bucket: str,
                                  depth_levels: int = 0, concurrency: int = 1,
                                  on_trading_over: Callable[[list[str]], Any] | None = None,
+                                 ladder_ids: set[str] | None = None,
                                  ) -> int:
     """Snapshot an explicit set of Kalshi markets. Shared by snapshot_kalshi
     (every open Kalshi market) and Phase 17 item 3's per-confirmed-pair
@@ -522,7 +524,7 @@ async def snapshot_kalshi_markets(kalshi: KalshiClient, store: SnapshotStore,
         bid_depth = _top_of_book_usd(m.yes_bid_dollars, m.yes_bid_size_fp)
         ask_depth = _top_of_book_usd(m.yes_ask_dollars, m.yes_ask_size_fp)
         bids_json = asks_json = None
-        if depth_levels > 0:
+        if depth_levels > 0 and (ladder_ids is None or row["condition_id"] in ladder_ids):
             # The full ladder, for the liquid tier only: unlike the scalars
             # above it costs a request each, and unlike them it cannot be
             # reconstructed later (same reasoning as the Polymarket store).
@@ -589,16 +591,52 @@ async def snapshot_kalshi(kalshi: KalshiClient, conn, store: SnapshotStore,
     # portfolio scans and what depth-based tiering would refine, so that is
     # where the measurement is worth its request budget (guardrail 8).
     depth_levels = config["collect"].get("book_depth_levels", 10) if tier == "liquid" else 0
+    # Each round fetches the full ladder for 1/N of the liquid markets, in a
+    # fixed rotation, rather than for all of them (2026-09-30). Every market
+    # still gets its price and top-of-book depth every round -- those come on
+    # the bulk market objects -- and its ladder every N rounds. The ladder was
+    # the whole cost of the round: one request per market, 2,516 of them, which
+    # at the 8 req/s ceiling is 5m20s against a 5-minute interval. APScheduler
+    # skipped every second firing, the grid became 10 minutes, and the rounds'
+    # phase put the newest complete liquid snapshot at 15m03s old when the
+    # 02:00 pass froze on 2026-09-30 -- past guardrail 13's 15-minute bound for
+    # every one of them: 1,650 liquid Kalshi markets forecast on 09-29, 77 on
+    # 09-30. No price or covariate the ledger records comes from the ladder.
+    ladder_ids = None
+    if depth_levels:
+        every = max(1, int(config["venues"]["kalshi"].get("ladder_every_n_rounds", 1)))
+        if every > 1:
+            ladder_ids = {m["condition_id"] for m in markets
+                          if _ladder_turn(m["condition_id"], ts_bucket, bucket_minutes, every)}
     written = await snapshot_kalshi_markets(
         kalshi, store, markets, ts_bucket, depth_levels=depth_levels,
         concurrency=config["venues"]["kalshi"].get("snapshot_concurrency", 1),
-        on_trading_over=lambda ids: mark_trading_over(conn, ids))
+        on_trading_over=lambda ids: mark_trading_over(conn, ids), ladder_ids=ladder_ids)
     log.info("kalshi snapshot round done",
              extra={"ctx": {"tier": tier, "markets": len(markets),
                             "unsampled_sports_skipped": dropped,
-                            "with_depth": len(markets) if depth_levels else 0,
+                            "with_depth": (len(ladder_ids) if ladder_ids is not None
+                                           else len(markets) if depth_levels else 0),
                             "written": written}})
     return written
+
+
+def _ladder_turn(condition_id: str, ts_bucket: str, bucket_minutes: int, every: int) -> bool:
+    """Whether this market's order-book ladder is fetched in the round keyed
+    `ts_bucket`: a fixed slot per market (from its id) against a round counter
+    (from the bucket), so each market comes up exactly once every `every`
+    rounds and a round covers ~1/`every` of the tier."""
+    import hashlib
+    from datetime import datetime
+
+    from datetime import timezone
+
+    slot = int(hashlib.sha256(condition_id.encode()).hexdigest()[:8], 16) % every
+    bucket = datetime.fromisoformat(ts_bucket)
+    if bucket.tzinfo is None:
+        bucket = bucket.replace(tzinfo=timezone.utc)
+    minutes = int(bucket.timestamp() // 60)
+    return slot == (minutes // max(1, bucket_minutes)) % every
 
 
 def mark_trading_over(conn, condition_ids: list[str]) -> int:
