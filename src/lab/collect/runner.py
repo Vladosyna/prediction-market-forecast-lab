@@ -125,14 +125,23 @@ async def snapshot_matched_pairs(clob: ClobClient, kalshi: KalshiClient, conn, s
     ts_bucket = floor_ts_bucket(now_utc(), bucket_minutes)
     depth_levels = config["collect"].get("book_depth_levels", 10)
 
+    # Concurrent like the tier rounds (2026-09-30). Awaited one book at a
+    # time, ~140 Polymarket legs took 30-161 s (median 92) against a
+    # 2-minute interval, and APScheduler skipped a third of the firings --
+    # an irregular ~3-minute grid for the series H3 exists to read. The
+    # token buckets still cap each venue's rate either way (guardrail 8).
     poly_markets = tracked_markets_by_ids(conn, poly_ids)
     if poly_markets:
-        counts["poly_written"] = await snapshot_markets(clob, store, poly_markets, ts_bucket, depth_levels)
+        counts["poly_written"] = await snapshot_markets(
+            clob, store, poly_markets, ts_bucket, depth_levels,
+            concurrency=config["collect"].get("snapshot_concurrency", 1))
 
     if kalshi_ids:
         kalshi_markets = tracked_kalshi_markets_by_ids(conn, kalshi_ids)
         if kalshi_markets:
-            counts["kalshi_written"] = await snapshot_kalshi_markets(kalshi, store, kalshi_markets, ts_bucket)
+            counts["kalshi_written"] = await snapshot_kalshi_markets(
+                kalshi, store, kalshi_markets, ts_bucket,
+                concurrency=config["venues"]["kalshi"].get("snapshot_concurrency", 1))
 
     log.info("matched-pair HF snapshot done", extra={"ctx": {
         "pairs": len(confirmed), "poly_markets": len(poly_markets) if poly_ids else 0,

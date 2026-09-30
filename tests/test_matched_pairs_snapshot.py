@@ -115,3 +115,38 @@ def test_snapshot_matched_pairs_is_safe_noop_with_no_confirmed_pairs(config):
     assert counts == {"poly_written": 0, "kalshi_written": 0}
     assert clob.calls == [] and kalshi.calls == []
     conn.close()
+
+
+def test_the_pair_legs_are_fetched_concurrently(config):
+    """Awaited one book at a time, ~140 legs took up to 161 s against a
+    2-minute interval and a third of the firings were skipped (2026-09-30).
+    The legs must overlap, within the configured bound."""
+    import asyncio as aio
+
+    from lab.store.snapshots import SnapshotStore
+
+    in_flight = {"now": 0, "peak": 0}
+
+    class SlowClob(FakeClobClient):
+        async def book(self, token_id):
+            in_flight["now"] += 1
+            in_flight["peak"] = max(in_flight["peak"], in_flight["now"])
+            await aio.sleep(0.01)
+            in_flight["now"] -= 1
+            return await super().book(token_id)
+
+    conn = db.connect(config["storage"]["db_path"])
+    books, confirmed = {}, []
+    for i in range(20):
+        _seed_poly_market(conn, f"0xp{i}", f"tok{i}")
+        books[f"tok{i}"] = OrderBook(bids=[{"price": 0.4, "size": 10}],
+                                     asks=[{"price": 0.6, "size": 10}])
+        confirmed.append({"condition_id": f"0xp{i}", "venue": "metaculus", "external_id": str(i)})
+    conn.commit()
+    config["collect"]["snapshot_concurrency"] = 4
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    counts = aio.run(snapshot_matched_pairs(SlowClob(books), FakeKalshiClient({}), conn, store,
+                                            config, {"confirmed": confirmed}))
+    assert counts["poly_written"] == 20
+    assert 1 < in_flight["peak"] <= 4
+    conn.close()
