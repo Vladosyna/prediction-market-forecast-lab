@@ -5055,6 +5055,46 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x20fd4cf096367edbd429168764db975b582249a7a3818684d051f445a3efaed1'
+  question: Will Dominique de Villepin win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-DVIL
+  external_question: Will Dominique de Villepin win the 2027 French presidential election?
+  rationale: 'Both markets resolve on the same specific outcome: whether Dominique
+    de Villepin wins the next French presidential election (expected April 2027).
+    Polymarket''s resolution text covers the general 2027 election and resolves to
+    the candidate who wins; Kalshi''s ticker suffix and outcome labels pin it to de
+    Villepin specifically, which is exactly the leg named in the Polymarket question.
+    Both use the same two-round election event and both would resolve Yes only if
+    de Villepin becomes president. Minor differences (Polymarket''s ''Other'' fallback
+    if results unknown by end of 2027, and sourcing details) are standard procedural
+    language and do not change the underlying event.'
+  confidence: 0.97
+  proposed_ts: '2026-10-01T15:39:08+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x895e01dbf3e6a33cd9a44ca0f8cdb5df1bd2b0b6ebed5300d28f8da7145145e4'
+  question: Will Donald Trump win the 2028 Republican presidential nomination?
+  venue: kalshi
+  external_id: KXPRESNOMR-28-DJT
+  external_question: Will Donald J. Trump be the nominee for the Presidency for the
+    Republican party?
+  rationale: 'Both markets resolve on the same specific outcome: Donald Trump winning
+    and accepting the 2028 Republican presidential nomination. The Polymarket question
+    names Trump and its criteria require winning and accepting the nomination; the
+    Kalshi outcome (ticker suffix DJT, label ''Donald J. Trump'') resolves Yes if
+    Trump wins and accepts the Republican nomination in 2028. The resolution wording
+    is essentially identical, including the ''wins and accepts'' condition. Minor
+    differences (Polymarket''s note that a pre-election replacement doesn''t change
+    resolution) do not alter the underlying event identity.'
+  confidence: 0.97
+  proposed_ts: '2026-10-01T15:39:09+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
