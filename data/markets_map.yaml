@@ -5261,6 +5261,30 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x5377b12dd060efd8e3597620f120648f1bf99452a95eb70374b128d9ca133227'
+  question: "Will Luiz In\xE1cio Lula da Silva win the first round of the 2026 Brazilian\
+    \ presidential election by 5\u201310%?"
+  venue: kalshi
+  external_id: KXBRPRES1MOV-BRPRES26-LSIL-P7
+  external_question: Will the margin of victory for Lula da Silva in the first round
+    of the 2026 Brazilian presidential election be between 5% and 10%?
+  rationale: 'Both markets resolve on the same event: whether Lula da Silva''s margin
+    of victory in the first round of the 2026 Brazilian presidential election falls
+    in the 5-10% range. Polymarket''s question specifies Lula winning by 5-10%, and
+    its resolution criteria define margin of victory as the absolute difference between
+    the top two candidates'' valid-vote percentages. Kalshi''s specific outcome ''Lula
+    da Silva, 5-10%'' resolves Yes if Lula''s margin of victory is within 5% (inclusive)
+    to 10% (exclusive). Both use the same election, same margin definition concept,
+    same official results basis (Brazilian TSE). The only minor discrepancy is bracket-edge
+    treatment (Polymarket resolves a value exactly between brackets to the higher
+    bracket, potentially differing at exactly 10%), but this is a negligible boundary
+    nuance that does not change the underlying event identity.'
+  confidence: 0.95
+  proposed_ts: '2026-10-02T21:00:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
