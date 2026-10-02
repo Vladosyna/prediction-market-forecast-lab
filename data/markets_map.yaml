@@ -5095,6 +5095,172 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x4a9d58d4da874e26708f5bdb014eb07a06aeebb927068d169d43831595386557'
+  question: Will Donald Trump Jr. win the 2028 Republican presidential nomination?
+  venue: kalshi
+  external_id: KXPRESNOMR-28-DJTJR
+  external_question: Will Donald J. Trump Jr. be the nominee for the Presidency for
+    the Republican party?
+  rationale: 'Both markets resolve on the same specific event: Donald J. Trump Jr.
+    winning and accepting the 2028 Republican Party presidential nomination. The Polymarket
+    question and criteria (''wins and accepts the 2028 nomination of the Republican
+    Party for U.S. president'') align closely with Kalshi''s specific outcome (ticker
+    suffix DJTJR, outcome ''Donald J. Trump Jr.'') and its criteria (''wins and accepts
+    the nomination for the Presidency for the Republican party in 2028''). Both reference
+    official party sources and effectively the same ''accepts'' condition; any pre-election
+    replacement not altering resolution is consistent with a nomination-winning event.
+    Minor differences in wording (e.g., resolution-source phrasing, references to
+    election day) do not create a substantive divergence.'
+  confidence: 0.97
+  proposed_ts: '2026-10-02T15:39:09+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x9b609d94cd0e303bf36f68a422a93f7dad9f58a2f8e4212eef51eed93480f323'
+  question: "Will Parti lib\xE9ral du Qu\xE9bec win the most seats in the 2026 Quebec\
+    \ general election?"
+  venue: kalshi
+  external_id: KXQUEBECASSEMBLY-26OCT05-PLQ
+  external_question: Will PLQ win the 2026 Quebec National Assembly election?
+  rationale: "Both markets resolve on whether the PLQ (Parti lib\xE9ral du Qu\xE9\
+    bec) wins the 2026 Quebec general election. Polymarket's question asks 'Will Parti\
+    \ lib\xE9ral du Qu\xE9bec win the most seats...' and its resolution criteria explicitly\
+    \ state the market resolves to the party winning the greatest number of seats,\
+    \ with tie-breakers. Kalshi's ticker suffix PLQ and outcome label 'PLQ' identify\
+    \ the specific leg, resolving Yes if PLQ wins the National Assembly election.\
+    \ 'Winning the election' in Quebec's first-past-the-post plurality context corresponds\
+    \ to winning the most seats, which aligns with Polymarket's criterion. The slight\
+    \ confidence discount reflects the residual ambiguity in Kalshi's terse 'wins\
+    \ the election' language versus Polymarket's explicit 'most seats' definition,\
+    \ but the practical resolution is the same event."
+  confidence: 0.85
+  proposed_ts: '2026-10-02T15:39:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xcb3a9ca91633c58ea4886b82edb537de4c7626197878e9768272a8bdeafd73bd'
+  question: Will Rebecca Bligh win the 2026 Vancouver mayoral election?
+  venue: kalshi
+  external_id: KXVANCOUVERMAYOR-26OCT17-RBLI
+  external_question: Will Rebecca Bligh win the 2026 Vancouver mayoral election?
+  rationale: 'Both markets resolve on the identical event: whether Rebecca Bligh wins
+    the 2026 Vancouver mayoral election. Polymarket''s question names Bligh as the
+    candidate and its criteria define the election and resolution source; Kalshi''s
+    specific outcome leg (ticker suffix RBLI, outcomes ''Not Rebecca Bligh | Rebecca
+    Bligh'') resolves Yes precisely if Bligh wins. Same event, same candidate, same
+    election date/cycle, same binary outcome. No material divergence in resolution
+    criteria detected.'
+  confidence: 0.97
+  proposed_ts: '2026-10-02T15:39:12+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0xcef0ea92825ef2e046a97ef9b628709d0071614832d3bfc9c6c8dc119a472618'
+  question: "Will Jorge Rodr\xEDguez be the leader of Venezuela end of 2026?"
+  venue: kalshi
+  external_id: KXVENEZUELALEADER-26DEC31-JROD
+  external_question: "Will Jorge Rodr\xEDguez be the head of state of Venezuela on\
+    \ Dec 31, 2026?"
+  rationale: "Both markets resolve on the same specific question: whether Jorge Rodr\xED\
+    guez officially holds the position of head of state of Venezuela on Dec 31, 2026.\
+    \ The resolutions are essentially identical in substance ('officially holds the\
+    \ position of the head of state'), with only a minor time-of-day difference (12\
+    \ PM ET vs 10 AM ET) on the same date, which is immaterial to the underlying event.\
+    \ The specified individual (Jorge Rodr\xEDguez) and the outcome labels match exactly."
+  confidence: 0.93
+  proposed_ts: '2026-10-02T15:39:13+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xce610556ec78cfd7894f4169d91fe70e31c2fb49f927fffd7fe7d06530f88d56'
+  question: Will David Lisnard win the 2027 French presidential election?
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-DLIS
+  external_question: Will David Lisnard win the 2027 French presidential election?
+  rationale: 'Both markets resolve on the same specific outcome: David Lisnard winning
+    the next French presidential election (expected 2027). Polymarket''s criteria
+    describe the general election resolution with two-round inclusion, timing (April
+    2027), and fallback to ''Other'' if undetermined by end-2027; Kalshi''s ticker
+    KXFRENCHPRES-27-DLIS and outcome label ''David Lisnard'' identify the identical
+    candidate-specific leg. The resolution condition for the ''David Lisnard'' outcome
+    matches: he wins the election. Minor differences in fallback/administrative language
+    (Polymarket''s ''Other'' clause and sourcing) do not change the underlying event;
+    both would resolve Yes only if Lisnard is elected president.'
+  confidence: 0.95
+  proposed_ts: '2026-10-02T15:39:15+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xe4044a81d532d3994fe8fd1d0ea0534843b2d0cc721565d5b35cb87c0c9f5fd1'
+  question: "Will Mar\xEDa Corina Machado be the de facto leader of Venezuela at the\
+    \ end of 2026?"
+  venue: kalshi
+  external_id: KXVENEZDEFACTO-27JAN01-MMAC
+  external_question: "Will Mar\xEDa Corina Machado de facto hold head of state of\
+    \ Venezuela at the end of 2026?"
+  rationale: "Both markets resolve on whether Mar\xEDa Corina Machado de facto holds/exercises\
+    \ the powers of head of state of Venezuela at the end of 2026 (Dec 31, 2026).\
+    \ Polymarket's detailed criteria define 'de facto holds' as exercising primary\
+    \ executive authority regardless of formal title or recognition, which aligns\
+    \ with Kalshi's 'de facto holds the position of head of state' resolution. The\
+    \ specified timeframes match and the subject is identical, so this is a genuine\
+    \ identity match."
+  confidence: 0.95
+  proposed_ts: '2026-10-02T15:39:16+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xf773a12cc13214fc493ec398f96c4ea5ec87ea4ff3b29795041d5498e314ad1e'
+  question: Will Benny Gantz be the next Prime Minister of Israel?
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-BGAN
+  external_question: Will Benny Gantz become Prime Minister of Israel following the
+    2026 Israeli legislative election?
+  rationale: Both markets resolve on Benny Gantz becoming Prime Minister of Israel
+    following the 2026 Israeli legislative election (scheduled Oct 27, 2026), with
+    resolution tied to being sworn in/appointed as PM after that election. The Polymarket
+    criteria's timing (sworn in by Dec 31, 2027) aligns closely with Kalshi's Oct
+    27, 2027 deadline; minor differences in outcome structure (Polymarket is a multi-candidate
+    field including 'Other') do not change that the Gantz leg is the same real-world
+    event as Kalshi's Benny Gantz outcome. Both require formal swearing-in and exclude
+    interim/caretaker PMs, and both use government formation after the same election
+    as the trigger.
+  confidence: 0.85
+  proposed_ts: '2026-10-02T15:39:17+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xfb2cb634e693b1758fc78b38b02754472edd728bd22eb4a7023c6f49419c73d6'
+  question: "Will Gideon Sa\u2019ar be the next Prime Minister of Israel?"
+  venue: kalshi
+  external_id: KXISRAELPM-26OCT27-GSAA
+  external_question: Will Gideon Sa'ar become Prime Minister of Israel following the
+    2026 Israeli legislative election?
+  rationale: "Both markets resolve on the same specific outcome: Gideon Sa'ar becoming\
+    \ Prime Minister of Israel following the 2026 legislative election. Polymarket's\
+    \ leg is the 'Gideon Sa'ar' outcome of a broader market (the SET resolution text\
+    \ describes appointing the next PM; the named question identifies the leg), and\
+    \ Kalshi's market is explicitly the GSAA outcome with matching criteria. Key elements\
+    \ align: same event trigger (government formation after the Oct 27, 2026 election),\
+    \ same formal-appointment requirement, and comparable resolution deadlines (Dec\
+    \ 31, 2027 vs Oct 27, 2027 \u2014 a minor discrepancy that could create edge cases\
+    \ but not a mismatch in the underlying event). Residual uncertainty comes from\
+    \ the slightly different deadlines and Polymarket's requirement that the individual\
+    \ be 'sworn in' vs Kalshi's 'meets all constitutional requirements,' but these\
+    \ describe the same real-world condition."
+  confidence: 0.88
+  proposed_ts: '2026-10-02T15:39:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
