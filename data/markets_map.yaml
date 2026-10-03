@@ -5285,6 +5285,180 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x010f3f24ab463669b4d3dee775864db64b2441f8fa7a34725765ff0d7c667ec8'
+  question: Will Ken Sim win the 2026 Vancouver mayoral election?
+  venue: kalshi
+  external_id: KXVANCOUVERMAYOR-26OCT17-KSIM
+  external_question: Will Ken Sim win the 2026 Vancouver mayoral election?
+  rationale: 'Both markets resolve on the identical specific outcome: whether Ken
+    Sim wins the 2026 Vancouver mayoral election, scheduled for October 17, 2026.
+    The Kalshi ticker suffix KSIM and outcome labels (''Ken Sim'') explicitly identify
+    the same candidate-specific outcome as the Polymarket question. Resolution criteria
+    are consistent (same election, same winner-determination standard), and both would
+    resolve on the same real-world event with no meaningful divergence in timing or
+    criteria.'
+  confidence: 0.97
+  proposed_ts: '2026-10-03T15:39:11+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x087469b4129c64c688397028059dfd366796adbd426e0079ee4cfdd2e4a07b61'
+  question: Will any presidential candidate win outright in the first round of the
+    Brazil election?
+  venue: kalshi
+  external_id: KXBRAZILPRES1R-26OCT04
+  external_question: Will anyone win outright in the first round of the 2026 Brazil
+    Presidential election?
+  rationale: Both markets ask whether any candidate wins outright in the first round
+    of the 2026 Brazil Presidential election. Polymarket resolves Yes if a candidate
+    wins in the first round (>50% of valid votes), No otherwise; Kalshi resolves Yes
+    if a candidate receives the 50% threshold to avoid a runoff. Same event, same
+    date (Oct 4, 2026), same resolution source logic (TSE/credible reporting). The
+    phrasing differs slightly (Polymarket 'more than 50% of valid votes' vs Kalshi
+    'required threshold of votes (50%)'), but both hinge on avoiding a second round,
+    and the resolution conditions are substantively identical. Minor edge-case risk
+    around 'valid votes' vs total votes is negligible given both reference the TSE
+    standard.
+  confidence: 0.93
+  proposed_ts: '2026-10-03T15:39:13+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x189fc3a42652bc98e40592bbdee43cb8160315310ce535a4fa37fd838da64e72'
+  question: Poilievre out as leader of Conservatives by December 31, 2026?
+  venue: kalshi
+  external_id: KXPOILIEVREOUT-26FEB15-27
+  external_question: Will Pierre Poilievre resign as the conservative party leader
+    before Jan 1, 2027?
+  rationale: 'Both markets resolve Yes on the same real-world event: Pierre Poilievre
+    ceasing to be Conservative Party leader (resignation/removal) before the start
+    of 2027. Kalshi''s specific ''Before 2027'' outcome matches Polymarket''s ''Yes''
+    condition, both allowing resolution upon announcement rather than only upon the
+    effective date. Minor wording differences (''out as leader'' vs. ''resign or otherwise
+    left their position''; Polymarket''s ''any period of time'' absence clause) do
+    not create meaningful divergence in the scenarios likely to occur.'
+  confidence: 0.92
+  proposed_ts: '2026-10-03T15:39:14+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x21ad31a46bfaa51650766eff6dc69c866959e32d965ffb116020e37694b6317d'
+  question: Will Marco Rubio win the 2028 Republican presidential nomination?
+  venue: kalshi
+  external_id: KXPRESNOMR-28-MR
+  external_question: Will Marco Rubio be the nominee for the Presidency for the Republican
+    party?
+  rationale: 'Both markets resolve on the same event: Marco Rubio winning and accepting
+    the 2028 Republican presidential nomination. Polymarket''s question and criteria
+    (wins and accepts the GOP nomination, per official Republican Party sources) align
+    directly with Kalshi''s outcome ''Marco Rubio'' on ''Will Marco Rubio be the nominee
+    for the Presidency for the Republican party?'' (wins and accepts the nomination
+    in 2028). Minor differences: Polymarket explicitly notes replacement before election
+    day does not change resolution, and Kalshi''s source isn''t specified, but these
+    do not create a substantive mismatch in the underlying event or outcome.'
+  confidence: 0.96
+  proposed_ts: '2026-10-03T15:39:15+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 1.0
+- condition_id: '0x290b3a5826b17e48ae7166b188767d95df5a9ed0b69fda116d98d0d27d753281'
+  question: "Will \xC9ric Zemmour win the 2027 French presidential election?"
+  venue: kalshi
+  external_id: KXFRENCHPRES-27-EZEM
+  external_question: "Will \xC9ric Zemmour win the 2027 French presidential election?"
+  rationale: "Both legs resolve on the same specific outcome: \xC9ric Zemmour winning\
+    \ the next French presidential election (2027). Polymarket's question names Zemmour\
+    \ and its criteria resolve on the candidate who wins the election, including any\
+    \ runoff; Kalshi's ticker suffix EZEM and outcome labels resolve Yes specifically\
+    \ on Zemmour winning. The resolution criteria are compatible \u2014 same real-world\
+    \ event, same resolution source semantics (election winner). Minor differences\
+    \ (Polymarket's Dec 31, 2027 fallback to 'Other', Kalshi's terser text) do not\
+    \ create a substantive divergence for the named outcome."
+  confidence: 0.97
+  proposed_ts: '2026-10-03T15:39:16+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x2cfc4c6d577109270352159a5ea834e706b4434e27e0fee45cc40bbdf238c78f'
+  question: Will Bad Bunny release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-BAD
+  external_question: Will Bad Bunny release a new album in 2026?
+  rationale: 'Both markets resolve on the same event: whether Bad Bunny officially
+    releases a new album in 2026. The Polymarket question and the Kalshi outcome ''Bad
+    Bunny'' for ticker KXALBUMRELEASE-26-BAD align directly. The Kalshi criteria are
+    terse but consistent with the Polymarket''s more detailed definitions (new album,
+    excluding live/compilation/re-release material). Polymarket''s added exclusions
+    (deluxe editions, <50% new tracks) could theoretically create edge-case divergence,
+    but the core event and resolution trigger are the same.'
+  confidence: 0.9
+  proposed_ts: '2026-10-03T15:39:18+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x36081a32ac369bad207447fa2bc5d6d663fb576e935178a4a297931ec571f5d1'
+  question: Will the International Court of Justice win the Nobel Peace Prize in 2026?
+  venue: kalshi
+  external_id: KXNOBELPEACE-26-ICJ
+  external_question: Who will win the Nobel Peace Prize?
+  rationale: 'Both markets resolve on the same real-world event: whether the International
+    Court of Justice wins the 2026 Nobel Peace Prize. Polymarket''s question names
+    the ICJ specifically, and though its resolution criteria describe a broader negRisk-style
+    set with tie-breaking precedence, the specific leg resolves to ICJ if ICJ is the
+    winner. Kalshi''s specific outcome KXNOBELPEACE-26-ICJ resolves Yes if ICJ wins
+    the 2026 Nobel Peace Prize. The resolution sources (official Norwegian Nobel Committee
+    announcement) and event are identical, so the two legs describe the same outcome.'
+  confidence: 0.95
+  proposed_ts: '2026-10-03T15:39:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x598b2c7ac71d375e181ec96e5d9c2cd0a63dd81f45474f53eaaee75506c9c908'
+  question: Will the Democratic Party win the IL-15 House seat?
+  venue: kalshi
+  external_id: KXHOUSERACE-IL15-26-D
+  external_question: Will Democratic win the House race for IL-15?
+  rationale: Both markets resolve on whether the Democratic Party wins/controls the
+    IL-15 U.S. House seat in the 2026 (midterm) elections. Polymarket resolves by
+    the winner of the IL-15 seat being a Democrat; Kalshi's outcome 'Jennifer Todd'
+    represents the Democratic candidate (with 'Not Jennifer Todd' as her opponent),
+    and its criteria resolve Yes if the IL-15 House member sworn in for the term beginning
+    2027 is a Democrat. The office, district, election cycle, and partisan resolution
+    condition align. Minor wording differences ('win the seat' vs. 'sworn-in member')
+    are immaterial to the outcome for this safe-seat context, and both effectively
+    hinge on the same Democratic-victory condition.
+  confidence: 0.9
+  proposed_ts: '2026-10-03T15:39:20+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xe2cd08587e1f67a41341994fc3ea053a8ed92b5258d42acf3d4448c75095eaa5'
+  question: Will Volodymyr Zelenskyy win the Nobel Peace Prize in 2026?
+  venue: kalshi
+  external_id: KXNOBELPEACE-26-VOL
+  external_question: Who will win the Nobel Peace Prize?
+  rationale: 'Both markets resolve on the same real-world event: whether Volodymyr
+    Zelenskyy wins the 2026 Nobel Peace Prize. The Kalshi leg explicitly resolves
+    Yes if Zelenskyy wins in 2026, and the Polymarket question is whether Zelenskyy
+    wins the 2026 prize. Polymarket''s complex precedence rules only matter in joint-award
+    scenarios, and even then Zelenskyy is second in precedence (only Trump above him),
+    so the two legs align on the specific outcome. Minor divergence possible only
+    in contrived joint-award cases involving Trump, which is not a substantive mismatch
+    of the underlying event.'
+  confidence: 0.9
+  proposed_ts: '2026-10-03T15:39:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
