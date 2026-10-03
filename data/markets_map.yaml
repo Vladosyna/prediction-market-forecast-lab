@@ -5459,6 +5459,27 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x116ef6172ae1fa2b206be1910f41a27f4a25bb7ed54d761157973a59518bd3ad'
+  question: Tom Holland as Spider-Man?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-TOM
+  external_question: 'Will Tom Holland perform as Spider-Man in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same real-world fact: whether Tom Holland
+    appears/perform as Spider-Man in Avengers: Doomsday. Polymarket resolves Yes if
+    the listed actor (Tom Holland) playing the listed character (Spider-Man) appears
+    in Avengers: Doomsday, resolving upon official casting announcement or footage
+    of the domestic theatrical cut. Kalshi''s specific outcome (ticker suffix TOM,
+    outcome ''Tom Holland as Spider-Man?'') resolves Yes if Tom Holland performs/is
+    announced as Spider-Man in Avengers: Doomsday. The resolution criteria align:
+    both trigger on the same casting/performance event and both account for the film
+    being cancelled or unreleased. Minor wording differences (''appears in'' vs ''performs/is
+    announced as'') do not create a substantive divergence for this specific outcome.'
+  confidence: 0.95
+  proposed_ts: '2026-10-03T21:00:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
