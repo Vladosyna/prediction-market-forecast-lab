@@ -5498,6 +5498,47 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x8a1b8ba89dcc18b6c871d493854e41625ddb3f3197e61a879514f2b567c21fcb'
+  question: Will Nicki Minaj release a new song in 2026?
+  venue: kalshi
+  external_id: KXSONGRELEASE-27JAN01-NIC
+  external_question: Will Nicki Minaj release a new song 2026?
+  rationale: 'Both markets resolve on the same real-world event: whether Nicki Minaj
+    (as primary artist) releases a new song in 2026. Polymarket''s detailed criteria
+    specify primary-artist-only, original (non-live/non-rerelease) releases, which
+    aligns with the standard interpretation of Kalshi''s ''releases a new song'' event.
+    Ticker suffix (27JAN01 = 2026) and outcome labels (''Nicki Minaj | Not Nicki Minaj'')
+    confirm the specific outcome corresponds to the same event. Minor residual risk:
+    Kalshi''s terser criteria leave edge cases (features, remixes) less explicit,
+    but no substantive conflict is apparent.'
+  confidence: 0.88
+  proposed_ts: '2026-10-04T21:00:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xae27764c02626c81bcbb732cb1e6cbb456ea16446c71fdbbd3f558b4469a804f'
+  question: Will the Republican Party win the MS-04 House seat?
+  venue: kalshi
+  external_id: KXHOUSERACE-MS04-26-R
+  external_question: Will Republican win the House race for MS-04?
+  rationale: 'Both markets resolve on the same real-world event: which party holds
+    the MS-04 U.S. House seat following the 2026 election. Polymarket asks whether
+    the Republican Party wins/represents MS-04; Kalshi''s ''R'' leg resolves Yes if
+    the member sworn in for MS-04 for the term beginning 2027 is Republican. The Kalshi
+    outcome labels (''Mike Ezell | Not Mike Ezell'') are consistent with the Republican
+    incumbent, but the substantive resolution is the party of the winner, matching
+    Polymarket. Minor differences: Polymarket keys off the 2026 midterm election result/party
+    affiliation at certification, Kalshi keys off the party of the member sworn in
+    for the 2027 term; these coincide under normal circumstances (seat is not vacant
+    mid-term change scenarios), and the risk of divergence is low. High confidence
+    match.'
+  confidence: 0.93
+  proposed_ts: '2026-10-04T21:00:12+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
