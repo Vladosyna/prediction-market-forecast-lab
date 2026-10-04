@@ -5480,6 +5480,24 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x57630ca87de434c74db1c388ed88c1920a6d1dfcf4094ef14a415dcc5049babc'
+  question: Katy Perry and Justin Trudeau engaged by end of 2026?
+  venue: kalshi
+  external_id: KXENGAGEMENTTRUDEAUPERRY-26
+  external_question: Will Katy Perry and Justin Trudeau be engaged in 2026?
+  rationale: 'Both markets resolve on whether Katy Perry and Justin Trudeau are reported/announced
+    to be engaged to be married before the end of 2026 (Kalshi ''Before 2027'' outcome
+    vs. Polymarket ''by December 31, 2026''). The resolution criteria are effectively
+    identical: engagement announcement/marriage before Jan 1, 2027. Minor differences
+    in wording (Polymarket explicitly allows marriage to qualify) don''t create a
+    meaningful discrepancy, since a marriage announcement necessarily implies an engagement.
+    Deadlines align (end of 2026). This is a genuine identity match.'
+  confidence: 0.93
+  proposed_ts: '2026-10-04T15:39:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
