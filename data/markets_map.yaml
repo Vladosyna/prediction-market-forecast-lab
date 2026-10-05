@@ -5539,6 +5539,33 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: kalshi:KXHURCAT-26FAY-T1
+  question: Will Fay become a Category 1 hurricane?
+  venue: kalshi
+  external_id: KXHURRICANENAMES-26DEC01ATL-FAY
+  external_question: Will Fay be categorized as a hurricane in the Atlantic in 2026?
+  rationale: Both ask whether the named storm Fay becomes a hurricane (Category 1
+    is the minimum hurricane threshold) in the Atlantic in 2026, i.e., the same real-world
+    event.
+  confidence: 0.9
+  proposed_ts: '2026-10-05T09:01:20+00:00'
+- condition_id: '0xdf0c6b5d69af22deae2f14aec8fc3c4c8f20e61e0a7de3a4861838cc9d984d8d'
+  question: Jonathan Majors as Kang?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-JON
+  external_question: 'Will Jonathan Majors perform as Kang in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same specific outcome: Jonathan Majors being
+    cast/announced as Kang in Avengers: Doomsday. The Polymarket question names Jonathan
+    Majors as Kang, and the Kalshi outcome label/ticker specifically identifies ''Jonathan
+    Majors as Kang'' in Avengers: Doomsday. Resolution criteria align: both trigger
+    on official casting announcement and both handle cancellation/non-release as the
+    fallback trigger. No material differences in the defined event.'
+  confidence: 0.93
+  proposed_ts: '2026-10-05T15:39:16+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
