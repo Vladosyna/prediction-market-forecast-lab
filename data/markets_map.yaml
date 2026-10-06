@@ -5566,6 +5566,156 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x07aecfdb8b93c2d9ee827358f7623b83cc8b1462d6e7386d4430b85b69522653'
+  question: Will John Tory win the 2026 Toronto mayoral election?
+  venue: kalshi
+  external_id: KXTORONTOMAYOR-26OCT26-JTOR
+  external_question: Will John Tory win the 2026 Toronto mayoral election?
+  rationale: "Both markets ask the identical question: whether John Tory wins the\
+    \ 2026 Toronto mayoral election, with binary outcomes on the same candidate and\
+    \ same election date (Oct 26, 2026). Resolution criteria are consistent \u2014\
+    \ Polymarket resolves to the winner of the election, and Kalshi's ticker suffix\
+    \ (JTORY) resolves Yes if John Tory wins. No meaningful divergence in criteria,\
+    \ event, or timing."
+  confidence: 0.95
+  proposed_ts: '2026-10-06T15:39:17+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x0afa82ff8cb4dcf8c7a248ccaf438597619d3a6a4e4463adb109e1a1034d6e10'
+  question: Will Taylor Swift be the top artist for 2026?
+  venue: kalshi
+  external_id: KXTOPARTIST-26B-TAY
+  external_question: Who will be the top Spotify artist this year?
+  rationale: 'Both markets resolve on the same real-world event: whether Taylor Swift
+    is the most streamed Spotify artist for 2026. Polymarket''s question ''Will Taylor
+    Swift be the top artist for 2026?'' resolves per Spotify''s top artist of 2026
+    (falling back to ''Other''), and Kalshi''s KXTOPARTIST-26B-TAY outcome ''Taylor
+    Swift'' resolves Yes if Taylor Swift is the most streamed Spotify artist in 2026.
+    The specific outcome leg described by the Kalshi ticker/outcome labels aligns
+    directly with the Polymarket leg. Both use Spotify Wrapped as the resolution source
+    for the same year, so resolution outcomes are identical.'
+  confidence: 0.95
+  proposed_ts: '2026-10-06T15:39:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x495d7107985ea26bd6b84c32701b3d071f2fe56235a51b8c707cfeef3112ace6'
+  question: Will John Coupar win the 2026 Vancouver mayoral election?
+  venue: kalshi
+  external_id: KXVANCOUVERMAYOR-26OCT17-JCOU
+  external_question: Will John Coupar win the 2026 Vancouver mayoral election?
+  rationale: 'Both markets resolve on the same specific outcome: whether John Coupar
+    wins the 2026 Vancouver mayoral election. Polymarket''s question names Coupar,
+    and its criteria define the election and resolution (who becomes next mayor as
+    a result of the election, per credible reporting/official Vancouver information).
+    Kalshi''s ticker suffix JCOU and outcomes (Not John Coupar | John Coupar) identify
+    the same single-candidate leg, resolving Yes if Coupar wins. Election date (Oct
+    17, 2026) and event match, and both key on the winner of the actual election.
+    Minor differences (Polymarket''s June 30, 2027 deadline and ''Other'' fallback)
+    don''t alter the shared resolution condition.'
+  confidence: 0.97
+  proposed_ts: '2026-10-06T15:39:20+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x6bc524ffd762f834357072923abe48110ad6a117fd5cf2d52077175f5851114b'
+  question: Will Anthony Furey win the 2026 Toronto mayoral election?
+  venue: kalshi
+  external_id: KXTORONTOMAYOR-26OCT26-AFUR
+  external_question: Will Anthony Furey win the 2026 Toronto mayoral election?
+  rationale: 'Both markets resolve on the same specific outcome: whether Anthony Furey
+    wins the 2026 Toronto mayoral election. The Polymarket question names Furey and
+    its criteria define the winner of the October 26, 2026 election as the resolution
+    basis; Kalshi''s ticker suffix (AFUR) and outcomes (Not Anthony Furey | Anthony
+    Furey) confirm the specific leg is Furey winning. Resolution criteria are consistent:
+    both hinge on Furey becoming mayor as a result of the election, not on a temporary/interim
+    mayor. No meaningful discrepancy found.'
+  confidence: 0.95
+  proposed_ts: '2026-10-06T15:39:22+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa087422678cebf674c69d2c86a13b89d153951f067f753e0c2044eb991c0652f'
+  question: Will Drake be the top artist for 2026?
+  venue: kalshi
+  external_id: KXTOPARTIST-26B-DRA
+  external_question: Who will be the top Spotify artist this year?
+  rationale: 'Both markets resolve on the same real-world event: the most streamed
+    Spotify artist for calendar year 2026, per Spotify''s official Wrapped release.
+    The Polymarket question names Drake as a candidate within its resolution set (with
+    ''Other'' fallback), and the Kalshi outcome label ''Drake'' resolves Yes if Drake
+    is that artist. The resolution sources and timeframes (2026, Spotify Wrapped)
+    align. Minor differences: Polymarket has a January 31, 2027 deadline and ''Other''
+    fallback, while Kalshi expresses a binary Yes/No on Drake specifically, but these
+    are equivalent in substance for the Drake outcome.'
+  confidence: 0.92
+  proposed_ts: '2026-10-06T15:39:23+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xaa171f20edcf257588ea814e41dd1a17030db545de05ee27be30beaddbcb3296'
+  question: Iman Vellani as Ms. Marvel?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-IMA
+  external_question: 'Will Iman Vellani perform as Ms. Marvel in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same specific outcome: whether Iman Vellani
+    appears/perform as Ms. Marvel (Kamala Khan) in Avengers: Doomsday. Polymarket''s
+    question names the character and the resolution criteria specify ''appears in
+    Avengers: Doomsday'' with resolution on casting announcement or theatrical footage;
+    Kalshi''s ticker suffix (IMA) and outcome label specify ''Iman Vellani performs/is
+    announced as Ms. Marvel in Avengers: Doomsday.'' The events are identical, and
+    the resolution triggers (casting announcement or appearance in the film) align
+    closely enough with no material divergence in subject, character, or film.'
+  confidence: 0.93
+  proposed_ts: '2026-10-06T15:39:25+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xea83e5554bfb997ea9d6569133e45165e8613dcc8fe6d0ae2a1c6cc1ae7c3a7f'
+  question: Will Sergio Massa win the 2027 Argentina presidential election?
+  venue: kalshi
+  external_id: KXARGENTINAPRES-27-SMAS
+  external_question: Who will win the next Argentine presidential election?
+  rationale: 'Both legs resolve on the same real-world event: whether Sergio Massa
+    wins the next Argentine presidential election. Polymarket asks ''Will Sergio Massa
+    win the 2027 Argentina presidential election?'', explicitly including any second
+    round and resolving via credible reporting/official Argentine electoral sources.
+    Kalshi''s specific outcome (ticker suffix SMAS, labels ''Sergio Massa'' vs ''Not
+    Sergio Massa'') resolves Yes precisely if Massa wins the next Argentine presidential
+    election. The elections align (Argentina''s next presidential election is scheduled
+    for October 2027, matching Polymarket''s stated date), and both are winner-take-all
+    on the same candidate, so the two legs are equivalent in substance.'
+  confidence: 0.93
+  proposed_ts: '2026-10-06T15:39:26+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xecf32b871ad1ab9ca961ce1a12d5758c59b07bdcb99f649a1dbe3f07e7cb4bde'
+  question: Will Greece recognize Palestine before 2027?
+  venue: kalshi
+  external_id: KXRECOGPALESTINE-27-GRE
+  external_question: Who will recognize Palestine?
+  rationale: 'Both markets resolve on the same specific event: whether Greece formally
+    recognizes the State of Palestine before January 1, 2027. The Polymarket question
+    explicitly names Greece, and the Kalshi ticker suffix -GRE with outcomes ''Not
+    Greece | Greece'' identifies Greece as the specific outcome leg. The deadlines
+    are effectively identical (Polymarket: by Dec 31, 2026, 11:59pm ET; Kalshi: before
+    Jan 1, 2027), and both require formal recognition rather than stated intent. No
+    material difference in resolution criteria is apparent.'
+  confidence: 0.97
+  proposed_ts: '2026-10-06T15:39:28+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
