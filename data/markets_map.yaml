@@ -5716,6 +5716,23 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xf42fdaf0069af7f49b1b2dcd8160ad73034c8704ef988c44dfe964f2f719facc'
+  question: Will Kirk LaPointe win the 2026 Vancouver mayoral election?
+  venue: kalshi
+  external_id: KXVANCOUVERMAYOR-26OCT17-KLAP
+  external_question: Will Kirk LaPointe win the 2026 Vancouver mayoral election?
+  rationale: 'Both markets resolve on the same specific outcome: whether Kirk LaPointe
+    wins the 2026 Vancouver mayoral election (scheduled Oct 17, 2026). Polymarket''s
+    question names the candidate and resolves per the election''s winner; Kalshi''s
+    ticker suffix and outcomes (Kirk LaPointe/Not Kirk LaPointe) resolve on that same
+    candidate winning the same election. Resolution criteria are consistent (winner
+    of the election, not an interim mayor). No material divergence identified.'
+  confidence: 0.95
+  proposed_ts: '2026-10-07T15:38:16+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
