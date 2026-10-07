@@ -5733,6 +5733,124 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x6947d1e419f570b92a6aa509cbb2eaf137fa9a0a1618b669b87a0bb354af3bd4'
+  question: Will Lana Del Rey release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-LAN
+  external_question: Will Lana Del Rey release a new album in 2026?
+  rationale: "Both markets resolve on the same real-world event: whether Lana Del\
+    \ Rey officially releases a new album in 2026. Polymarket's criteria specify the\
+    \ window (market creation to Dec 31, 2026), exclude live/re-release/compilation\
+    \ albums unless \u226550% new tracks, and set resolution sources. Kalshi's outcome\
+    \ ('Will Lana Del Rey release a new album in 2026?') covers the same artist, event,\
+    \ and year. While Kalshi's published criteria are terser and don't restate exclusions,\
+    \ the subject and timeframe align exactly, making this effectively an identity\
+    \ match. Minor residual risk from differing detail on what counts as a 'new album'\
+    \ (e.g., deluxe editions), but this is unlikely to produce divergent outcomes."
+  confidence: 0.9
+  proposed_ts: '2026-10-07T21:00:12+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x6a07dfa017ff96c5502d8c2e64cb00b0bdeb8a8426eccae80f2a64e06366ffdd'
+  question: Will Rihanna release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-RIH
+  external_question: Will Rihanna release a new album in 2026?
+  rationale: 'Both markets resolve on the same real-world event: Rihanna officially
+    releasing a new album in 2026. Polymarket''s question and Kalshi''s specific outcome
+    (ticker suffix ''RIH'', outcome label ''Rihanna'') align. Polymarket provides
+    more detailed criteria excluding live albums, re-releases, deluxe editions, compilations,
+    and greatest hits (unless 50%+ new tracks), while Kalshi''s criteria is terser
+    but does not contradict this. Both specify 2026 as the timeframe. No material
+    divergence found in the resolution events.'
+  confidence: 0.9
+  proposed_ts: '2026-10-07T21:00:13+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x7560d17de8eba126e67e2d32e88faf61b0fa558d88b258accaf097e43a0382c5'
+  question: Brie Larson as Captain Marvel?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-BRI
+  external_question: 'Will Brie Larson perform as Captain Marvel in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on whether Brie Larson appears/plays Captain Marvel
+    in Avengers: Doomsday. The Polymarket question and criteria explicitly cover the
+    actor playing the listed character in that film, and Kalshi''s specific outcome
+    is ''Brie Larson as Captain Marvel'' with ticker suffix identifying the same role/film.
+    Resolution triggers (casting announcement, footage, cancellation deadline) are
+    essentially equivalent, and both use official announcements/credible reporting
+    as the basis. The outcome labels and criteria align on the same real-world event.'
+  confidence: 0.95
+  proposed_ts: '2026-10-07T21:00:14+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x76415d8735b0e5bf13d2ec0473ead9bd40f07ea8c82487328408db95cb3a602f'
+  question: Jon Favreau as Happy Hogan?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-JONF
+  external_question: 'Will Jon Favreau perform as Happy Hogan in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same specific outcome: whether Jon Favreau
+    appears as Happy Hogan in Avengers: Doomsday. Polymarket''s question names the
+    exact actor/character pair, and its leg resolves on that casting/appearance. Kalshi''s
+    ticker suffix (JONF) and outcome labels identify the same specific outcome. Resolution
+    criteria are compatible (casting announcement, footage, or credible reporting),
+    and both reference the same film. Minor wording differences (Polymarket allows
+    non-Favreau cast list inclusion; Kalshi says ''performs/announced'') do not create
+    a substantive divergence.'
+  confidence: 0.95
+  proposed_ts: '2026-10-07T21:00:16+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x9d4b05bf105b6ac1b67427e5b336680507aee28753ac0930333ebb3215eb1ce0'
+  question: Will Playboi Carti release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-PLA
+  external_question: Will Playboi Carti release a new album in 2026?
+  rationale: 'Both markets resolve on the same real-world event: whether Playboi Carti
+    officially releases a new album during 2026. The Kalshi ticker suffix (PLA) and
+    outcome labels (''Playboi Carti'') identify the specific leg matching the Polymarket
+    question. Polymarket provides detailed criteria (excluding live/compilation/deluxe
+    unless 50%+ new tracks, precedence of streaming platforms), while Kalshi''s stated
+    criteria are terser (''releases a new album in 2026''). The criteria are broadly
+    aligned on the core event; the main residual risk is that Kalshi''s vaguer ''new
+    album'' definition could theoretically resolve differently on edge cases (e.g.,
+    a deluxe edition), but for the typical case the intent is identical. High confidence,
+    conservatively capped below the tool''s 0.95 due to the criteria-detail asymmetry.'
+  confidence: 0.85
+  proposed_ts: '2026-10-07T21:00:18+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xce92e2efdc13584f681266b443bbfe7671a11c5295234621eda97258207b894b'
+  question: Will Frank Ocean release a new song in 2026?
+  venue: kalshi
+  external_id: KXSONGRELEASE-27JAN01-FRA
+  external_question: Will Frank Ocean release a new song 2026?
+  rationale: 'Both markets concern the same artist (Frank Ocean) and the same event
+    (release of a new song in 2026). Kalshi''s outcome ''Frank Ocean'' corresponds
+    to the same Yes/No question as Polymarket''s ''Will Frank Ocean release a new
+    song in 2026?'' The Kalshi criteria say ''If Frank Ocean releases a new song in
+    2026, then the market resolves to Yes,'' which is materially identical to Polymarket''s
+    resolution. Polymarket''s criteria are far more detailed, but the core event and
+    resolution condition match. Minor risk: Kalshi''s terser criteria could be interpreted
+    slightly more loosely (e.g., no explicit exclusion of features, live versions,
+    or re-releases), but there is no indication of a substantive divergence for this
+    event. Match, with slightly reduced confidence due to the asymmetry in criteria
+    detail.'
+  confidence: 0.85
+  proposed_ts: '2026-10-07T21:00:19+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
