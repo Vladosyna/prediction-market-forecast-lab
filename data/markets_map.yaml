@@ -5888,6 +5888,23 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xd904f952c9b101184dda166e40c76268e5bbb68286d6514999f661eb5dd6e2f5'
+  question: Will Italy recognize Palestine before 2027?
+  venue: kalshi
+  external_id: KXRECOGPALESTINE-27-ITA
+  external_question: Who will recognize Palestine?
+  rationale: 'Both markets resolve on the same specific event: formal recognition
+    of Palestine by Italy before the end of 2026 (Polymarket''s Dec 31, 2026 deadline
+    vs. Kalshi''s Jan 1, 2027 cutoff are equivalent). Polymarket''s ''Yes'' on ''Will
+    Italy recognize Palestine before 2027?'' maps directly to Kalshi''s ''Italy''
+    outcome in KXRECOGPALESTINE-27-ITA. Resolution criteria are consistent, including
+    the requirement for formal recognition rather than mere statements of intent.'
+  confidence: 0.97
+  proposed_ts: '2026-10-08T21:00:10+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
