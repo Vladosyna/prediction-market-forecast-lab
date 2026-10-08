@@ -5851,6 +5851,43 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x4889f2333d0cda4368a7d37afc2a3a47fa628af304608c095774f3075c3eb95f'
+  question: Evangeline Lilly as the Wasp?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-EVA
+  external_question: 'Will Evangeline Lilly perform as the Wasp in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same specific outcome: whether Evangeline
+    Lilly plays the Wasp in Avengers: Doomsday. Polymarket''s question names exactly
+    this actor/character pair, and the Kalshi ticker suffix (EVA) and outcome label
+    confirm the same individual. Resolution sources are compatible (official casting
+    announcements, footage from the theatrical cut, credible reporting), and both
+    handle delay/cancellation similarly. Minor wording differences (''appears in''
+    vs ''performs / is announced as'') do not create a substantive gap since Polymarket
+    also resolves on casting announcements. High confidence given the matching actor,
+    character, film, and resolution logic.'
+  confidence: 0.92
+  proposed_ts: '2026-10-08T15:22:23+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0x759ceaf5eb99bed7eed8a42ad74593a25d6114c88b0475df5e2dba7ad155e4df'
+  question: Will The Netherlands recognize Palestine before 2027?
+  venue: kalshi
+  external_id: KXRECOGPALESTINE-27-DUT
+  external_question: Who will recognize Palestine?
+  rationale: 'Both markets resolve on the same specific event: whether The Netherlands
+    formally recognizes Palestine before the end of 2026/Jan 1, 2027. Polymarket''s
+    question names The Netherlands specifically and its criteria require formal recognition
+    (not just intent); Kalshi''s specific outcome ''The Netherlands'' resolves Yes
+    if the Netherlands recognizes Palestine before Jan 1, 2027. The deadlines (Dec
+    31, 2026 vs Jan 1, 2027) are effectively identical, and both require formal recognition.'
+  confidence: 0.95
+  proposed_ts: '2026-10-08T15:22:25+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
