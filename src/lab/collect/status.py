@@ -289,6 +289,24 @@ def _venue_watcher_health(conn, venue: str, now: datetime) -> dict[str, Any]:
     }
 
 
+# Cursor stamps of the series that carry open markets. An uncorrelated IN,
+# evaluated once: the EXISTS this replaces re-scanned every open Kalshi market
+# for each cursor row, through an expression no index can serve, and the
+# discovery sweep (PAP 9.29) adds ~200 dormant series to the cursor a day. The
+# hourly health check calls this; it grew from ~5.5 to ~11 minutes of CPU an
+# hour between 10-01 and 10-08 on a one-vCPU host, and `lab status` and the
+# dashboard's opening page stopped returning within 10 minutes.
+LIVE_SERIES_CURSOR_SQL = """
+    SELECT s.attempted_ts AS ts
+    FROM kalshi_series_sync s
+    WHERE s.series IN (
+      SELECT substr(m.venue_native_id, 1, instr(m.venue_native_id || '-', '-') - 1)
+      FROM markets m
+      WHERE m.venue = 'kalshi' AND m.active = 1 AND m.closed = 0
+    )
+"""
+
+
 def _kalshi_sync_rotation(conn, now: datetime) -> dict[str, Any]:
     """How far behind the Kalshi universe sync's rotation is, over the series
     that actually carry open markets.
@@ -298,17 +316,7 @@ def _kalshi_sync_rotation(conn, now: datetime) -> dict[str, Any]:
     rotation stalled at a 383-hour median (2026-09-07, against a designed 26)
     was invisible until someone queried the database by hand.
     """
-    rows = conn.execute(
-        """
-        SELECT s.attempted_ts AS ts
-        FROM kalshi_series_sync s
-        WHERE EXISTS (
-          SELECT 1 FROM markets m
-          WHERE m.venue = 'kalshi' AND m.active = 1 AND m.closed = 0
-            AND substr(m.venue_native_id, 1, instr(m.venue_native_id || '-', '-') - 1) = s.series
-        )
-        """
-    ).fetchall()
+    rows = conn.execute(LIVE_SERIES_CURSOR_SQL).fetchall()
     ages = sorted(a for a in (_hours_since(r["ts"], now) for r in rows) if a is not None)
     empty_streak = conn.execute(
         "SELECT COUNT(*) AS n FROM kalshi_series_sync WHERE consecutive_empty >= 3"

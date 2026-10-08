@@ -177,6 +177,46 @@ def test_gather_status_reports_per_venue_health(tmp_path):
     assert "last_snapshot_age_min" not in status["venues"]["manifold"]
 
 
+def test_kalshi_rotation_counts_live_series_without_a_correlated_scan(tmp_path):
+    """The cursor query re-scanned every open Kalshi market once per cursor
+    row; with ~200 dormant series joining the cursor a day it took the hourly
+    health check from ~5.5 to ~11 minutes of CPU an hour (2026-10-01..08)."""
+    from lab.collect.status import LIVE_SERIES_CURSOR_SQL, _kalshi_sync_rotation
+
+    conn = db.connect(tmp_path / "lab.db")
+    for ticker, open_ in (("KXFED-26DEC-T4.25", 1), ("KXFED-26DEC-T4.50", 1),
+                          ("KXCPI-26OCT-B3", 0), ("SOLO", 1)):
+        db.upsert_market(conn, {
+            "condition_id": f"kalshi:{ticker}", "venue": "kalshi", "venue_native_id": ticker,
+            "slug": None, "question": "q", "category": "economics", "description": "d",
+            "end_date_iso": None, "token_id_yes": None, "token_id_no": None, "neg_risk": 0,
+            "active": open_, "closed": 1 - open_, "liquidity_num": 1.0, "volume_num": 1.0,
+            "tier": "tail"})
+    for series, ts in (("KXFED", "2026-10-08T00:00:00+00:00"),   # live, two open markets
+                       ("KXCPI", "2026-10-08T01:00:00+00:00"),   # only a closed market
+                       ("SOLO", "2026-10-07T12:00:00+00:00"),    # ticker with no dash
+                       ("KXDORMANT", "2026-10-01T00:00:00+00:00")):
+        conn.execute("INSERT INTO kalshi_series_sync (series, attempted_ts) VALUES (?, ?)",
+                     (series, ts))
+    conn.commit()
+
+    old = conn.execute("""
+        SELECT s.attempted_ts AS ts FROM kalshi_series_sync s WHERE EXISTS (
+          SELECT 1 FROM markets m WHERE m.venue = 'kalshi' AND m.active = 1 AND m.closed = 0
+            AND substr(m.venue_native_id, 1, instr(m.venue_native_id || '-', '-') - 1) = s.series)
+    """).fetchall()
+    new = conn.execute(LIVE_SERIES_CURSOR_SQL).fetchall()
+    assert sorted(r["ts"] for r in new) == sorted(r["ts"] for r in old) == [
+        "2026-10-07T12:00:00+00:00", "2026-10-08T00:00:00+00:00"]
+    plan = " ".join(str(tuple(r)) for r in conn.execute("EXPLAIN QUERY PLAN " + LIVE_SERIES_CURSOR_SQL))
+    assert "CORRELATED" not in plan.upper()
+
+    out = _kalshi_sync_rotation(conn, datetime(2026, 10, 8, 12, tzinfo=timezone.utc))
+    assert out["live_series_measured"] == 2 and out["series_with_cursor"] == 4
+    assert out["age_h_max"] == 24.0
+    conn.close()
+
+
 # --- streaming gap detection (2026-07-28 render memory) --------------------
 
 def test_streaming_gap_path_matches_the_whole_frame_path(tmp_path):
