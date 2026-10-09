@@ -469,14 +469,15 @@ async def _run_lab_command_out_of_process(*args: str) -> None:
     collector for the rest of the day, and an OOM kill lands on the child while
     collection keeps running.
 
-    Both current callers earned their place by taking the box down.
-    `report` (2026-07-28): peaks ~834MB over ~178s against a collector already
-    holding ~565MB, on 967MB of RAM. `learn` (2026-08-02): the monthly loop
-    ran for the first time since 2026-07-02, against a database that had grown
-    four-fold in the meantime, and pushed 1.8GB into swap -- staying under its
-    700MB RSS cap the whole time, since MemoryMax does not bound swap -- which
-    thrashed the host for 21 hours with collection dead before a global OOM
-    ended it.
+    Every caller earned its place by taking the box down. `report`
+    (2026-07-28): peaks ~834MB over ~178s against a collector already holding
+    ~565MB, on 967MB of RAM. `learn` (2026-08-02, since moved to its own unit):
+    the monthly loop ran for the first time since 2026-07-02, against a
+    database that had grown four-fold in the meantime, and pushed 1.8GB into
+    swap -- staying under its 700MB RSS cap the whole time, since MemoryMax
+    does not bound swap -- which thrashed the host for 21 hours with
+    collection dead before a global OOM ended it. `forecast` and `eval`
+    (2026-10-07 and 10-09): the orchestrator itself OOM-killed at its cap.
 
     Raising on a non-zero exit is deliberate: `_run` then declines to record a
     success, so the job retries on its own control age rather than pretending
@@ -582,8 +583,18 @@ def _build_analytics_services(config: dict[str, Any]) -> dict[str, Callable[[], 
             # them renders or publishes what they produced, and re-running the
             # ledger writer to recover a failed render is both pointless and
             # (for the LLM-backed forecast step) billable.
-            await asyncio.to_thread(analytics.run_forecast_job, config)
-            await asyncio.to_thread(analytics.run_eval_job, config)
+            #
+            # Each in its own child (2026-10-09), as report already was. In
+            # this process their peaks stacked on the collector's resident set
+            # and stayed there: the orchestrator was OOM-killed at ~1.39 GB
+            # anon RSS against its 1.4 GiB MemoryMax on 10-07 (in publish) and
+            # 10-09 (just after eval), collector included. A child returns its
+            # peak to the OS when it exits, so forecast's leftovers no longer
+            # sit under eval's, and an OOM kill lands on the child. It still
+            # shares this cgroup's MemoryMax -- headroom, not a separate budget
+            # (learn needed its own unit for that).
+            await _run_lab_command_out_of_process("forecast")
+            await _run_lab_command_out_of_process("eval")
 
         async def tail() -> None:
             # Steps whose failure must not re-trigger the bundle: a stalled git

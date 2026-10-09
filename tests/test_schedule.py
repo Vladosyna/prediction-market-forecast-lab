@@ -184,8 +184,11 @@ def test_report_is_its_own_service_not_part_of_the_nightly_bundle():
     assert "report" in runner.SERVICE_NAMES
     src = inspect.getsource(runner._build_analytics_services)
     bundle = src.split("async def run_forecast_service", 1)[1].split("async def run_report_service", 1)[0]
-    assert "run_forecast_job" in bundle and "run_eval_job" in bundle
-    assert "run_report_job" not in bundle, "report is back inside the nightly bundle"
+    assert ('_run_lab_command_out_of_process("forecast")' in bundle
+            and '_run_lab_command_out_of_process("eval")' in bundle)
+    assert ("run_report_job" not in bundle
+            and '_run_lab_command_out_of_process("report")' not in bundle), (
+        "report is back inside the nightly bundle")
 
 
 def test_report_control_age_is_not_hourly():
@@ -213,9 +216,12 @@ def test_heavy_batch_jobs_run_out_of_process():
     assert "raise RuntimeError" in src
 
     services = inspect.getsource(runner._build_analytics_services)
-    assert '_run_lab_command_out_of_process("report")' in services, (
-        "report is back in the orchestrator process"
-    )
+    for command in ("report", "forecast", "eval"):
+        assert f'_run_lab_command_out_of_process("{command}")' in services, (
+            f"{command} is back in the orchestrator process")
+    # forecast and eval took the orchestrator down in-process on 2026-10-07/09.
+    assert "analytics.run_forecast_job" not in services
+    assert "analytics.run_eval_job" not in services
 
 
 def test_learn_is_not_scheduled_by_the_orchestrator_at_all():

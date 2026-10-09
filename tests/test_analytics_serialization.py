@@ -67,9 +67,10 @@ def _instrument(monkeypatch, config, durations):
     ]:
         monkeypatch.setattr(analytics, attr, _make(name))
 
-    # report and learn no longer call a jobs.* function at all -- they spawn
-    # `lab <cmd>` in a child process (runner._run_lab_command_out_of_process,
-    # after each took the host down: report 2026-07-28, learn 2026-08-02).
+    # report, forecast and eval no longer call a jobs.* function at all -- they
+    # spawn `lab <cmd>` in a child process (runner._run_lab_command_out_of_process,
+    # after each took the host down: report 2026-07-28, forecast/eval
+    # 2026-10-07 and 10-09; learn has had its own systemd unit since 08-05).
     # Patch that path too, or they run real subprocesses here and, worse, drop
     # out of the serialization check entirely -- which is exactly how report
     # silently stopped being covered by this test on 2026-07-28.
