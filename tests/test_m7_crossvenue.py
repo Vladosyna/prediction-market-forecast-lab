@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+from datetime import timedelta
 
 import pytest
 
@@ -193,13 +194,15 @@ def test_confirmed_by_condition_excludes_proposed():
 
 
 def _seed_market_with_snapshot(conn, store, cid: str, mid: float = 0.5):
+    # Relative, not a calendar date: a fixed 2026-12-31 fell inside 90 days on
+    # 2026-10-02 and moved the m1_hier test below out of its gt90d bucket.
+    end_date = (now_utc() + timedelta(days=400)).isoformat(timespec="seconds")
     conn.execute(
         """INSERT INTO markets (condition_id, slug, question, category, description,
                                 end_date_iso, token_id_yes, tier, active, closed,
                                 liquidity_num, volume_num)
-           VALUES (?, ?, ?, 'politics', 'd', '2026-12-31T00:00:00+00:00', ?, 'liquid', 1, 0,
-                   200000, 2000000)""",
-        (cid, cid, f"Question for {cid}?", f"tok-{cid}"),
+           VALUES (?, ?, ?, 'politics', 'd', ?, ?, 'liquid', 1, 0, 200000, 2000000)""",
+        (cid, cid, f"Question for {cid}?", end_date, f"tok-{cid}"),
     )
     store.append([{
         "ts": floor_ts_bucket(now_utc(), 5), "condition_id": cid, "token_id_yes": f"tok-{cid}",
