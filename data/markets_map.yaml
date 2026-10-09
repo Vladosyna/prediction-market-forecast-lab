@@ -4148,7 +4148,30 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-10-09T15:12:03+00:00'
-proposed: []
+proposed:
+- condition_id: '0x70187b4770796788b9d1f3fc6652c596870a9a837b96c832441652588f26029d'
+  question: "Will Mar\xEDa Corina Machado be the leader of Venezuela end of 2026?"
+  venue: kalshi
+  external_id: KXVENEZUELALEADER-26DEC31-MCM
+  external_question: "Will Mar\xEDa Corina Machado be the head of state of Venezuela\
+    \ on Dec 31, 2026?"
+  rationale: "Both markets resolve on the same specific outcome: Mar\xEDa Corina Machado\
+    \ holding the position of head of state of Venezuela at the end of 2026. The Polymarket\
+    \ question and the Kalshi outcome (ticker suffix MCM, outcome label 'Mar\xEDa\
+    \ Corina Machado') align on the same individual and event. Resolution criteria\
+    \ are substantially equivalent: both key on 'officially holds' the head of state\
+    \ position on Dec 31, 2026 (12 PM ET vs 10:00 AM ET, a minor timing discrepancy\
+    \ unlikely to matter absent a same-day transition). The event question (Venezuela\
+    \ leader) is shared, and the specific leg is clearly the Machado outcome in both\
+    \ cases. Minor differences in sourcing language (Polymarket's detailed UN/official-government\
+    \ fallback vs Kalshi's terser 'officially holds') do not create a substantive\
+    \ divergence. Third-party identity match is corroborated independently."
+  confidence: 0.93
+  proposed_ts: '2026-10-09T15:23:23+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
