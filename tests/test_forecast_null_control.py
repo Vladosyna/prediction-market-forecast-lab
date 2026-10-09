@@ -377,6 +377,46 @@ def test_markets_past_their_end_date_are_not_forecast():
     assert "0xtoday" not in ids, "past the end date by a minute is still past it"
 
 
+def test_markets_with_no_price_are_counted_not_silently_dropped(caplog, tmp_path):
+    """Until 2026-10-09 a market with no snapshot in two days, or one whose
+    latest quote had no mid, left the eligible set without a trace, while the
+    stale counter beside it read as if it covered every price failure. That
+    day 413 of 719 open Polymarket sports markets had no fresh price."""
+    import logging
+
+    from lab.forecast import eligible_market_states
+    from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+    from lab.util import now_utc
+
+    config = load_config()
+    config["storage"] = {**config["storage"], "db_path": str(tmp_path / "lab.db"),
+                         "snapshots_dir": str(tmp_path / "snapshots")}
+    conn = db.connect(tmp_path / "lab.db")
+    store = SnapshotStore(str(tmp_path / "snapshots"))
+    ts = floor_ts_bucket(now_utc(), 5)
+    for cid, venue, mid in (("0xpriced", "polymarket", 0.5), ("0xnosnap", "polymarket", None),
+                            ("kalshi:NOMID", "kalshi", None)):
+        conn.execute(
+            "INSERT INTO markets (condition_id, question, category, description, end_date_iso,"
+            " venue, tier, active, closed) VALUES (?, 'Q?', 'economics', 'rules', NULL, ?,"
+            " 'liquid', 1, 0)", (cid, venue))
+        if cid != "0xnosnap":
+            store.append([{
+                "ts": ts, "condition_id": cid, "token_id_yes": None, "best_bid": None,
+                "best_ask": None, "mid": mid, "spread": None, "bid_depth_usd": None,
+                "ask_depth_usd": None, "last_trade_price": None, "venue": venue}])
+    conn.commit()
+
+    with caplog.at_level(logging.INFO, logger="lab.forecast"):
+        ids = {s.condition_id for s in eligible_market_states(conn, store, config)}
+    conn.close()
+
+    assert ids == {"0xpriced"}
+    record = next(r for r in caplog.records
+                  if r.getMessage() == "forecast: skipped markets with no price in two days")
+    assert record.ctx == {"count": 2, "by_venue": {"polymarket": 1, "kalshi": 1}}
+
+
 def test_polymarket_null_control_is_the_whole_pool():
     """PAP 9.42 (2026-10-10): of 150 sampled Polymarket sports markets only ~38
     had a fresh, in-band price on a given day, and the control was heading for

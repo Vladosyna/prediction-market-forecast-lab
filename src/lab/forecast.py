@@ -232,6 +232,11 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
     ).fetchall()
     skipped_stale = 0
     skipped_ended = 0
+    # No usable price in two days at all: books that close during a game, a
+    # quote with no mid. Counted since 2026-10-09 -- until then these left
+    # without a trace, while the stale counter beside them looked complete
+    # (413 of 719 open Polymarket sports markets had no fresh price that day).
+    unpriced: dict[str, int] = {}
     for m in rows:
         if m["category"] == nc_category and m["condition_id"] not in nc_ids:
             continue
@@ -253,6 +258,8 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
             continue
         snap = snap_by_cid.get(m["condition_id"])
         if snap is None or snap["mid"] is None:
+            venue = m["venue"] or "polymarket"
+            unpriced[venue] = unpriced.get(venue, 0) + 1
             continue
         snap_ts = datetime.fromisoformat(snap["ts"])
         if snap_ts.tzinfo is None:
@@ -286,6 +293,9 @@ def eligible_market_states(conn, store: SnapshotStore, config: dict[str, Any]) -
     if skipped_ended:
         log.info("forecast: skipped markets already past their end date",
                  extra={"ctx": {"count": skipped_ended}})
+    if unpriced:
+        log.info("forecast: skipped markets with no price in two days",
+                 extra={"ctx": {"count": sum(unpriced.values()), "by_venue": unpriced}})
     return states
 
 
