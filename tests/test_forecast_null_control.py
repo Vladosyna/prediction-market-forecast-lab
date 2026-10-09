@@ -377,6 +377,15 @@ def test_markets_past_their_end_date_are_not_forecast():
     assert "0xtoday" not in ids, "past the end date by a minute is still past it"
 
 
+def test_polymarket_null_control_is_the_whole_pool():
+    """PAP 9.42 (2026-10-10): of 150 sampled Polymarket sports markets only ~38
+    had a fresh, in-band price on a given day, and the control was heading for
+    ~175 scoreable clusters at the analysis instant -- under the 200 floor, on
+    H1's own venue. The pool held 719 open markets; the sample covers it."""
+    sizes = load_config()["universe"]["null_control"]["sample_size_per_venue"]
+    assert sizes["polymarket"] >= 719
+
+
 # --- Phase 15 microstructure covariates (implemented 2026-08-10) ------------
 
 def test_forecast_rows_carry_the_phase_15_covariates():

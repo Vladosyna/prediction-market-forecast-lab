@@ -60,8 +60,16 @@ universe:
     # or ~0.12 (Kalshi), 10-20x any plausible real effect. 150 per venue
     # targets roughly +/-0.02-0.03 by the freeze. Cheap models only: M3/M3b
     # forecast their own target lists, which exclude sports.
+    #
+    # Polymarket 150 -> 1000 from 2026-10-10 (PAP 9.42): the whole pool. On
+    # 2026-10-09 it held 719 open sports markets, and only 38 of the 150
+    # sampled had a fresh, in-band price on a given day (books close during
+    # games), so the control had added 8 scoreable clusters since 09-25 and
+    # was heading for ~175 at the analysis instant -- under the 200 floor, on
+    # H1's own venue. Every Polymarket sports market is snapshotted anyway, so
+    # this costs no requests. Kalshi's 150 projects to ~850 and is unchanged.
     sample_size_per_venue:
-      polymarket: 150
+      polymarket: 1000
       kalshi: 150
     random_seed: 42
     # Whether the venue-wide snapshot rounds also collect the sports markets

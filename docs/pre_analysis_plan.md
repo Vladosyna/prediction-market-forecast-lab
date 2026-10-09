@@ -1696,3 +1696,47 @@ have achieved, and a negative or zero result is the more informative outcome.
 drill earlier the same day computed the pooled Brier statistics of three models as of 2026-09-26 to
 check the backup reproduced them; those are the same numbers the nightly evaluation already
 publishes, they are not this statistic, and they were not broken down by category.
+
+**Addendum 9.42 (2026-10-09).** Polymarket's null control becomes the whole eligible pool. Its
+purpose is unchanged (§5, 9.34); this changes Polymarket's sample size and nothing else. Kalshi's
+stays at 150.
+
+**Why.** 9.34 projected that 150 markets per venue would bring each venue's control to roughly
+±0.02–0.03 by the freeze. On Polymarket that projection assumed the sampled markets would be
+forecast, and most of them are not. On 2026-10-09 at about 15:50 UTC, of the 150 sampled Polymarket
+markets, **38** had a price the forecast pass accepts: 47 were stale, 32 had no snapshot in two
+days, 23 were priced outside (0.05, 0.95) and 10 were past their end date. Sports books close while
+a game is played and while a market waits for its result, so on any given day much of the pool has
+no usable price. Since 9.34 took effect the control had added **8** scoreable Polymarket clusters
+(66 in all since 2026-07-06; Kalshi 49 and 105). At that rate it would reach about **175** at the 9.40
+instant, under §7's 200-cluster floor, on the venue H1 is about.
+
+**The change.** From the forecast pass of 2026-10-10, Polymarket's sample size is 1,000. That is
+above the whole pool, which held **719** open sports markets in the snapshotted tiers on 2026-10-09,
+so the control is every eligible Polymarket sports market. If the pool ever outgrows it, 9.36's
+ranking decides which 1,000. Measured the same afternoon, **164** of the 719 had an accepted price.
+35 of those end within 30 days, against 9 in the old sample, so the daily cohort is about four
+times larger, which projects to roughly **500** scoreable clusters at the 9.40 instant. That
+projection comes from one afternoon's prices and is stated as such.
+
+It remains cheap models only. Every Polymarket sports market is already snapshotted (9.26 left
+Polymarket's rounds unfiltered), so no requests are added. It adds roughly 600 forecast rows a day.
+
+**What follows from 9.23.** The predicate 9.23 applies to M6 and M7 admits a sports market when it is
+in the sample. With the whole pool in the sample, M6 and M7 now write on every Polymarket sports
+market they structurally cover, including sports pairs a human confirmed. 9.23's principle was that
+no model and no person decides the control's membership, and it still holds: membership is now
+simply everything eligible. M6's and M7's rows within it are their structural scope, as they are
+everywhere else, and each model's null-control row is scored separately.
+
+**What stays valid.** Forward-only. Null-control rows written before this date remain valid placebo
+observations, because their membership came from seeded draws that do not depend on outcomes.
+Scoring reads membership off the ledger (9.34), so the control extends without being re-drawn.
+Kalshi is unchanged at 150 and projects to roughly 850 scoreable clusters at the 9.40 instant.
+
+**What was seen before this was written.** Only counts were looked at:
+- how many sampled markets had an accepted price, and why the rest did not;
+- the size of the pool;
+- the number of resolved, scoreable null-control clusters per venue.
+
+No null-control skill estimate, Brier value or confidence sequence was consulted.
