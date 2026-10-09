@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 import pytest
 
@@ -36,8 +37,13 @@ def config(tmp_path):
 
 class FakeProvider:
     def fetch(self, query, max_items=20):
+        # A day old, not a calendar date: evidence decays as exp(-age/tau), tau 5
+        # days, so a fixed 2026-07-01 shifted the price ~0.4 log-odds when this
+        # was written (07-02), ~1e-9 by October and not at all by 2026-12-28 --
+        # "for_yes evidence shifts up" below had been passing on rounding.
+        published_ts = (now_utc() - timedelta(days=1)).isoformat(timespec="seconds")
         return [Article(title="Positive development for X", url="http://n/1",
-                        source="fake", published_ts="2026-07-01T00:00:00+00:00",
+                        source="fake", published_ts=published_ts,
                         summary="X moved closer to happening.")]
 
 
@@ -63,15 +69,19 @@ class FakeLlm:
 
 def _seed_markets(conn, store, n=3):
     ts_bucket = floor_ts_bucket(now_utc(), 5)
+    # Relative, not a calendar date: a fixed 2026-12-31T00:00 end date is past
+    # from the first second of that day, eligible_market_states skips markets
+    # past their end date, and the forecast pass these tests drive wrote nothing.
+    end_date = (now_utc() + timedelta(days=400)).isoformat(timespec="seconds")
     for i in range(n):
         cid = f"0x{i}"
         conn.execute(
             """INSERT INTO markets (condition_id, slug, question, category, description,
                                     end_date_iso, token_id_yes, tier, active, closed,
                                     liquidity_num, volume_num)
-               VALUES (?, ?, ?, 'politics', 'Resolves YES if X.', '2026-12-31T00:00:00+00:00',
+               VALUES (?, ?, ?, 'politics', 'Resolves YES if X.', ?,
                        ?, 'liquid', 1, 0, ?, 5000000)""",
-            (cid, f"m-{i}", f"Will X{i} happen?", f"tok{i}", 1000000 - i),
+            (cid, f"m-{i}", f"Will X{i} happen?", end_date, f"tok{i}", 1000000 - i),
         )
         store.append([{
             "ts": ts_bucket, "condition_id": cid, "token_id_yes": f"tok{i}",

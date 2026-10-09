@@ -19,6 +19,7 @@ suite's collector tests.
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 
 import pytest
 
@@ -33,7 +34,7 @@ from lab.collect.kalshi_collector import (
 from lab.forecast import null_control_ids
 from lab.store import db
 from lab.store.snapshots import SnapshotStore
-from lab.util import load_config
+from lab.util import load_config, now_utc
 
 
 class FakeKalshiClient:
@@ -76,10 +77,14 @@ def conn(config):
 
 def _seed(conn, ticker, category, tier="tail", venue="kalshi"):
     cid = db.venue_condition_id(venue, ticker)
+    # Relative, not a calendar date: the Kalshi watcher also checks markets past
+    # their end date, so from 2026-12-31 a fixed end date of that day put every
+    # seeded market, open or not, in front of it.
+    end_date = (now_utc() + timedelta(days=400)).isoformat(timespec="seconds")
     db.upsert_market(conn, {
         "condition_id": cid, "venue": venue, "venue_native_id": ticker,
         "slug": None, "question": "q?", "category": category, "description": "d",
-        "end_date_iso": "2026-12-31T00:00:00+00:00",
+        "end_date_iso": end_date,
         "token_id_yes": None, "token_id_no": None, "neg_risk": 0,
         "active": 1, "closed": 0, "liquidity_num": 0.0, "volume_num": 0.0,
         "tier": tier,
