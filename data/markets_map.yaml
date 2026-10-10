@@ -4172,6 +4172,47 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x528fbd8194e1aa1f094589a02f18477b0edd7c4fb413140774a781d847972869'
+  question: Will Japan recognize Palestine before 2027?
+  venue: kalshi
+  external_id: KXRECOGPALESTINE-27-JAP
+  external_question: Who will recognize Palestine?
+  rationale: 'Both markets resolve on the same specific outcome: whether Japan formally
+    recognizes the State of Palestine before the start of 2027. Polymarket''s deadline
+    is Dec 31, 2026 11:59pm ET, which is effectively before Jan 1, 2027, matching
+    Kalshi''s explicit ''before Jan 1, 2027'' end date. Both require formal recognition
+    rather than an announcement of intent (Polymarket states this explicitly; Kalshi''s
+    ''recognizes'' language aligns). Kalshi''s ticker suffix -JAP isolates the Japan
+    outcome, matching the Polymarket question''s Japan-specific framing. Minor timing
+    nuance: Polymarket''s ET cutoff vs. a calendar-date cutoff could create a negligible
+    edge case, but no meaningful divergence.'
+  confidence: 0.93
+  proposed_ts: '2026-10-10T15:59:04+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+- condition_id: '0xa6406c5e7b3d32781543b0956f78fd847aa47677fc18f3ec8582e95f139a6a1b'
+  question: Will the Democratic Party win the PA-16 House seat?
+  venue: kalshi
+  external_id: KXHOUSERACE-PA16-26-D
+  external_question: Will Democratic win the House race for PA-16?
+  rationale: 'Both markets resolve on the same real-world event: which party wins
+    the PA-16 U.S. House seat in the 2026 midterm elections. Polymarket resolves by
+    the party of the winning candidate; Kalshi resolves Yes if the House member sworn
+    in for PA-16 for the 2027 term is a Democrat, and its outcome label (Justin Wagner,
+    the Democratic candidate) confirms the specific leg is the Democratic-win outcome.
+    The resolution criteria are functionally equivalent (party of the seat winner),
+    with only minor differences in timing (calling of the election vs. swearing-in)
+    and sourcing conventions that are unlikely to diverge in practice. The Kalshi
+    outcome labels include a named candidate rather than generic ''Democratic'', but
+    Wagner is the Democratic nominee, so the Democratic-win outcome aligns.'
+  confidence: 0.9
+  proposed_ts: '2026-10-10T15:59:05+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
