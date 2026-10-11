@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -202,6 +203,18 @@ def _add_interval_job(scheduler, fn, minutes: float, **kw) -> None:
     scheduler.add_job(fn, "interval", minutes=minutes, **kw)
 
 
+# Minutes past each hour at which the Polymarket tail round starts.
+TAIL_ROUND_PHASE_MINUTES = 5
+
+
+def _phase_anchor(minutes_past_midnight: float) -> datetime:
+    """A fixed UTC anchor for an interval job. IntervalTrigger fires at
+    start_date + k * interval, so with an anchor the job's phase no longer
+    depends on the minute the process happened to start."""
+    midnight = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + timedelta(minutes=minutes_past_midnight)
+
+
 def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -> CollectContext:
     """Build shared resources and register the collection interval jobs."""
     bucket = TokenBucket(
@@ -234,7 +247,16 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
     cadence = config["collect"]["snapshot_interval_minutes"]
     _add_interval_job(scheduler, job_sync, config["universe"]["sync_interval_minutes"])
     _add_interval_job(scheduler, job_snap_liquid, cadence["liquid"])
-    _add_interval_job(scheduler, job_snap_tail, cadence["tail"])
+    # Pinned to :05 past the hour (2026-10-11). Tail rows carry the hour the
+    # round started in, and guardrail 13 measures age from that label, so a
+    # round still running when the 02:00 forecast pass reads the archive makes
+    # the newest complete round look two hours old. The phase used to be the
+    # minute the process last started: a restart at 15:58 put the round at :58,
+    # and at 02:00 on 10-10 and 10-11 ~1,280 Polymarket tail markets -- half the
+    # venue's daily coverage -- were skipped as stale. From :05, a ~10-minute
+    # round keeps the newest complete one within ~75 minutes of its label.
+    _add_interval_job(scheduler, job_snap_tail, cadence["tail"],
+                      start_date=_phase_anchor(TAIL_ROUND_PHASE_MINUTES))
     _add_interval_job(scheduler, job_resolutions, config["collect"]["resolution_poll_minutes"])
 
     # Phase 18: unconditional, unlike the 4 jobs above -- deliberately does NOT

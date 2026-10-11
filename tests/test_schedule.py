@@ -323,6 +323,39 @@ def test_every_collector_interval_job_survives_a_busy_loop(tmp_path):
     _asyncio.run(_check())
 
 
+def test_polymarket_tail_round_keeps_its_phase_across_restarts(tmp_path):
+    """Tail rows are labelled with the hour their round started in, and
+    guardrail 13 measures age from that label. The round's phase used to be
+    the minute the process last started: a restart at 15:58 on 2026-10-09 put
+    it at :58, so at the 02:00 forecast pass on 10-10 and 10-11 a round was
+    still running, the newest complete one carried a label two hours back, and
+    ~1,280 Polymarket tail markets were skipped as stale each night."""
+    import asyncio as _asyncio
+    from datetime import datetime, timezone
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from lab.collect.runner import TAIL_ROUND_PHASE_MINUTES
+
+    config = load_config()
+    config = {**config, "storage": {**config["storage"], "db_path": str(tmp_path / "lab.db"),
+                                    "snapshots_dir": str(tmp_path / "snapshots")}}
+
+    async def _check() -> None:
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        ctx = register_collect_jobs(scheduler, config)
+        tail = next(j for j in scheduler.get_jobs() if j.name.endswith(".job_snap_tail"))
+        for started in ("01:58", "14:49", "04:37", "00:03"):
+            hour, minute = map(int, started.split(":"))
+            now = datetime(2026, 10, 11, hour, minute, tzinfo=timezone.utc)
+            fire = tail.trigger.get_next_fire_time(None, now)
+            assert fire.minute == TAIL_ROUND_PHASE_MINUTES and fire.second == 0, (
+                f"a process started at {started} would run the tail round at {fire:%H:%M}")
+        await ctx.aclose()
+
+    _asyncio.run(_check())
+
+
 def _seed_coverage(conn, model, venue, days, n):
     """`days` consecutive dates ending 2026-08-20, `n` forecasts each."""
     import datetime
