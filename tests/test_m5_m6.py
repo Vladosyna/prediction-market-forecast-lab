@@ -137,3 +137,123 @@ def test_m6_link_violation():
     v = check_link(link, {"n": 0.6, "b": 0.4})
     assert v is not None and v["violation"] == pytest.approx(0.2)
     assert check_link(link, {"n": 0.3, "b": 0.5}) is None
+
+
+# --- M6 freshness, completeness and cadence (2026-10-11, PAP 9.44) ----------
+
+def _m6_config(tmp_path):
+    from lab.util import load_config
+
+    config = load_config()
+    config["storage"] = {**config["storage"], "db_path": str(tmp_path / "lab.db"),
+                         "snapshots_dir": str(tmp_path / "snapshots")}
+    return config
+
+
+def _market(conn, cid, tier="liquid", category="politics"):
+    conn.execute("INSERT INTO markets (condition_id, venue, category, tier, active, closed)"
+                 " VALUES (?, 'polymarket', ?, ?, 1, 0)", (cid, category, tier))
+
+
+def test_m6_prices_only_what_guardrail_13_accepts(tmp_path):
+    """M6 took any mid from the last two days, so a leg could be priced, and a
+    forecast paired, a day stale. The bound is the market's own tier's."""
+    from datetime import timedelta
+
+    import polars as pl
+
+    from lab.models.m6_consistency import fresh_prices
+    from lab.store import db
+    from lab.util import now_utc
+
+    config = _m6_config(tmp_path)
+    conn = db.connect(config["storage"]["db_path"])
+    _market(conn, "0xliq", "liquid")
+    _market(conn, "0xtail", "tail")
+    conn.commit()
+    now = now_utc()
+    latest = pl.DataFrame([
+        {"ts": (now - timedelta(minutes=20)).isoformat(), "condition_id": "0xliq", "mid": 0.4, "spread": 0.02},
+        {"ts": (now - timedelta(minutes=60)).isoformat(), "condition_id": "0xtail", "mid": 0.3, "spread": 0.03},
+        {"ts": (now - timedelta(minutes=100)).isoformat(), "condition_id": "0xnone", "mid": 0.2, "spread": None},
+        {"ts": (now - timedelta(minutes=5)).isoformat(), "condition_id": "0xnomid", "mid": None, "spread": None},
+    ])
+    assert fresh_prices(conn, latest, config, now) == {"0xtail": {"p_yes": 0.3, "spread": 0.03}}
+    conn.close()
+
+
+def test_m6_scans_an_event_only_when_every_open_leg_is_freshly_priced(tmp_path, monkeypatch):
+    """A leg missing from the sum pulled it below 1 by that leg's own
+    probability, which read as incoherence and pushed every other leg up.
+    Closed legs cannot win and are left out of the sum on purpose."""
+    import asyncio
+
+    from lab.models import m6_consistency
+    from lab.store import db
+    from lab.store.snapshots import SnapshotStore, floor_ts_bucket
+    from lab.util import now_utc
+
+    config = _m6_config(tmp_path)
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    ts = floor_ts_bucket(now_utc(), 5)
+    priced = {"a1": 0.3, "a2": 0.3, "a3": 0.3, "b1": 0.5, "c1": 0.6, "c2": 0.4}
+    for cid, mid in priced.items():
+        _market(conn, cid)
+        store.append([{"ts": ts, "condition_id": cid, "mid": mid, "spread": 0.02}])
+    _market(conn, "b2")          # open, never priced
+    conn.commit()
+
+    def leg(cid, closed=False):
+        return {"conditionId": cid, "active": True, "closed": closed}
+
+    events = [
+        {"slug": "a", "negRisk": True, "markets": [leg("a1"), leg("a2"), leg("a3")]},
+        {"slug": "b", "negRisk": True, "markets": [leg("b1"), leg("b2")]},
+        {"slug": "c", "negRisk": True, "markets": [leg("c1"), leg("c2"), leg("c3", closed=True)]},
+    ]
+
+    class FakeGamma:
+        def __init__(self, bucket):
+            pass
+
+        async def get_json(self, path, params=None):
+            return events
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr("lab.api.gamma.GammaClient", FakeGamma)
+    monkeypatch.setattr(m6_consistency, "load_links", lambda: [])
+    findings = asyncio.run(m6_consistency.scan_universe(conn, store, config))
+    conn.close()
+
+    by_slug = {f["event_slug"]: f for f in findings}
+    assert set(by_slug) == {"a", "c"}, "event b has an unpriced open leg and must be skipped"
+    assert by_slug["a"]["incoherent"]
+    assert {c["condition_id"] for c in by_slug["a"]["corrections"]} == {"a1", "a2", "a3"}
+    assert all(c["spread"] == pytest.approx(0.02) for c in by_slug["a"]["corrections"])
+    assert by_slug["c"]["n_legs"] == 2 and not by_slug["c"]["incoherent"]
+
+
+def test_m6_writes_once_a_day_against_the_price_it_was_computed_from(tmp_path):
+    """No due check meant any second pass in a day wrote M6 again (30, 43 and
+    37 markets on 2026-10-07, 10-09 and 10-11). And the row is paired against
+    the price its coherent value came from, not a later re-read."""
+    from lab.models.m6_consistency import write_m6_forecasts
+    from lab.store import db
+
+    config = _m6_config(tmp_path)
+    conn = db.connect(config["storage"]["db_path"])
+    _market(conn, "0xa1")
+    conn.commit()
+    findings = [{"incoherent": True, "corrections": [
+        {"condition_id": "0xa1", "p_market": 0.30, "p_coherent": 1 / 3, "spread": 0.02}]}]
+
+    assert write_m6_forecasts(conn, None, findings, config) == 1
+    assert write_m6_forecasts(conn, None, findings, config) == 0
+    row = conn.execute("SELECT p_yes, p_market_at_ts, spread_at_ts FROM forecasts "
+                       "WHERE model_id = 'm6_consistency'").fetchone()
+    assert row["p_market_at_ts"] == pytest.approx(0.30) and row["spread_at_ts"] == pytest.approx(0.02)
+    assert row["p_yes"] == pytest.approx(1 / 3)
+    conn.close()

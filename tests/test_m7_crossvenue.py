@@ -244,6 +244,23 @@ def test_write_m7_forecasts_writes_five_confirmed_pairs_and_skips_unconfirmed(co
     conn.close()
 
 
+def test_write_m7_forecasts_writes_once_per_calendar_day(config):
+    """M7 had no due check: any second pass in a day -- every catch-up after a
+    restart -- wrote it again (49, 49 and 179 markets on 2026-10-07, 10-09 and
+    10-11). It now follows the calendar-day rule every other model follows."""
+    conn = db.connect(config["storage"]["db_path"])
+    store = SnapshotStore(config["storage"]["snapshots_dir"])
+    _seed_market_with_snapshot(conn, store, "0xA")
+    conn.commit()
+    results = {"0xA": ForecastResult(p_yes=0.6, meta={"quotes": [], "n_pooled": 1})}
+
+    assert write_m7_forecasts(conn, store, results, config) == 1
+    assert write_m7_forecasts(conn, store, results, config) == 0
+    assert conn.execute("SELECT COUNT(*) AS n FROM forecasts WHERE model_id='m7_crossvenue'"
+                        ).fetchone()["n"] == 1
+    conn.close()
+
+
 class FakeMetaculusClient:
     def __init__(self, bucket, raw_cp: float = 0.5) -> None:
         self.raw_cp = raw_cp

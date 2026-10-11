@@ -485,13 +485,19 @@ def write_m7_forecasts(conn, store, results: dict[str, ForecastResult],
     # set was landing on the null control -- the selection guardrail 12 exists
     # to forbid. 31 sports markets in the week to that date, 29 of them never
     # produced by the filtered path.
-    from lab.forecast import drop_null_control_outsiders
+    from lab.forecast import _due, drop_null_control_outsiders
 
     allowed = drop_null_control_outsiders(conn, config, list(results))
-    written = skipped_null_control = 0
+    written = skipped_null_control = not_due = 0
     for cid, result in results.items():
         if cid not in allowed:
             skipped_null_control += 1
+            continue
+        # Once per market per calendar day, as every other model (PAP 9.38,
+        # 9.44): without this a second pass the same day -- any catch-up --
+        # wrote M7 again (49, 49 and 179 markets on 10-07, 10-09, 10-11).
+        if not _due(conn, cid, "m7_crossvenue", config, None, now=now):
+            not_due += 1
             continue
         row = snap.get(cid)
         if row is None:
@@ -510,6 +516,8 @@ def write_m7_forecasts(conn, store, results: dict[str, ForecastResult],
     if skipped_null_control:
         log.info("m7: skipped sports markets outside the null-control sample",
                  extra={"ctx": {"count": skipped_null_control}})
+    if not_due:
+        log.info("m7: skipped markets already forecast today", extra={"ctx": {"count": not_due}})
     conn.commit()
     return written
 

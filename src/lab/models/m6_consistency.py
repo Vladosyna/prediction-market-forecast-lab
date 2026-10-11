@@ -46,8 +46,31 @@ def scan_negrisk_event(legs: list[dict[str, float | str]]) -> dict[str, Any]:
                     "condition_id": l["condition_id"],
                     "p_market": p,
                     "p_coherent": coherent,
+                    "spread": l.get("spread"),
                 })
     return result
+
+
+def fresh_prices(conn, latest, config: dict[str, Any], now) -> dict[str, dict[str, Any]]:
+    """{condition_id: {p_yes, spread}} for the latest snapshots guardrail 13
+    accepts -- within the market's tier bound, the tail bound for a market in
+    no snapshotted tier. Until 2026-10-11 M6 took any mid from the last two
+    days, so a leg could be priced, and a forecast paired, a day stale."""
+    from datetime import datetime, timezone
+
+    max_age = config["forecast"]["max_snapshot_age_minutes"]
+    tiers = {r[0]: r[1] for r in conn.execute(
+        "SELECT condition_id, tier FROM markets WHERE tier IN ('liquid', 'tail')")}
+    out: dict[str, dict[str, Any]] = {}
+    for r in latest.to_dicts():
+        if r["mid"] is None:
+            continue
+        ts = datetime.fromisoformat(r["ts"])
+        ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        bound = max_age.get(tiers.get(r["condition_id"]), max_age["tail"])
+        if (now - ts).total_seconds() / 60 <= bound:
+            out[r["condition_id"]] = {"p_yes": r["mid"], "spread": r.get("spread")}
+    return out
 
 
 def load_links(path: Path | None = None) -> list[dict[str, Any]]:
@@ -101,12 +124,13 @@ async def scan_universe(conn, store, config: dict[str, Any]) -> list[dict[str, A
     latest = store.latest_per_market([utc_date_str(now - timedelta(days=d)) for d in range(2)])
     if latest.is_empty():
         return []
-    mid_by_cid = {r["condition_id"]: r["mid"] for r in latest.to_dicts()}
+    fresh = fresh_prices(conn, latest, config, now)
 
     bucket = TokenBucket(rate=config["collect"]["rate_limit"]["requests_per_second"],
                         burst=config["collect"]["rate_limit"]["burst"])
     gamma = GammaClient(bucket)
     findings: list[dict[str, Any]] = []
+    incomplete = 0
     try:
         raw = await gamma.get_json("/events", params={
             "limit": 100, "offset": 0, "active": "true", "closed": "false",
@@ -116,11 +140,17 @@ async def scan_universe(conn, store, config: dict[str, Any]) -> list[dict[str, A
         for ev in events:
             if not ev.get("negRisk"):
                 continue
-            legs = []
-            for m in ev.get("markets", []):
-                cid = m.get("conditionId")
-                if cid in mid_by_cid and mid_by_cid[cid] is not None:
-                    legs.append({"condition_id": cid, "p_yes": mid_by_cid[cid]})
+            # Every open leg, or no scan (2026-10-11). The sum runs over the
+            # legs that can still win; a leg missing from it -- unpriced, or
+            # priced too long ago for guardrail 13 -- pulls the sum below 1 by
+            # its own probability, which read as incoherence and pushed every
+            # other leg up.
+            open_legs = [m.get("conditionId") for m in ev.get("markets", [])
+                         if m.get("active", True) and not m.get("closed", False)]
+            if any(cid not in fresh for cid in open_legs):
+                incomplete += 1
+                continue
+            legs = [{"condition_id": cid, **fresh[cid]} for cid in open_legs]
             if len(legs) >= 2:
                 scan = scan_negrisk_event(legs)
                 scan["event_slug"] = ev.get("slug")
@@ -128,30 +158,32 @@ async def scan_universe(conn, store, config: dict[str, Any]) -> list[dict[str, A
     finally:
         await gamma.aclose()
 
-    prices = {cid: p for cid, p in mid_by_cid.items() if p is not None}
+    prices = {cid: v["p_yes"] for cid, v in fresh.items()}
     for link in load_links():
         v = check_link(link, prices)
         if v:
+            for corr in v["corrections"]:
+                corr["spread"] = fresh[corr["condition_id"]]["spread"]
             findings.append({"kind": "link_violation", **v})
 
     incoherent = [f for f in findings if f.get("incoherent") or f.get("violation")]
     log.info("m6 scan complete",
-             extra={"ctx": {"events": len(findings), "incoherent": len(incoherent)}})
+             extra={"ctx": {"events": len(findings), "incoherent": len(incoherent),
+                            "skipped_incomplete_or_stale": incomplete}})
     return findings
 
 
 def write_m6_forecasts(conn, store, findings: list[dict[str, Any]],
                        config: dict[str, Any]) -> int:
-    """Append ledger rows for incoherent legs, pulled toward coherence."""
-    from datetime import timedelta
+    """Append ledger rows for incoherent legs, pulled toward coherence.
 
+    Each row is paired against the price its own coherent value was computed
+    from (the scan's fresh price), not a re-read of the archive minutes later
+    -- the same rule M4 has followed since 2026-08-18."""
     from lab.store import db as dbmod
-    from lab.store.snapshots import utc_date_str
     from lab.util import now_utc
 
     now = now_utc()
-    latest = store.latest_per_market([utc_date_str(now - timedelta(days=d)) for d in range(2)])
-    snap = {r["condition_id"]: r for r in latest.to_dicts()} if not latest.is_empty() else {}
     ts = now.isoformat(timespec="seconds")
     lo, hi = config["forecast"]["p_clamp"]
 
@@ -159,32 +191,37 @@ def write_m6_forecasts(conn, store, findings: list[dict[str, Any]],
     # every write path, not just the one inside eligible_market_states. Until
     # 2026-08-22 it held only there, and this loop wrote on 62 sports markets
     # against a configured sample of 30.
-    from lab.forecast import drop_null_control_outsiders
+    from lab.forecast import _due, drop_null_control_outsiders
 
     allowed = drop_null_control_outsiders(
         conn, config,
         [c["condition_id"] for f in findings for c in f.get("corrections", [])])
 
-    written = skipped_null_control = 0
+    written = skipped_null_control = not_due = 0
     for finding in findings:
         for corr in finding.get("corrections", []):
             if corr["condition_id"] not in allowed:
                 skipped_null_control += 1
                 continue
-            row = snap.get(corr["condition_id"])
-            if row is None:
+            # Once per market per calendar day, as every other model (PAP 9.38,
+            # 9.44): without this a second pass the same day -- any catch-up --
+            # wrote M6 again (30, 43 and 37 markets on 10-07, 10-09, 10-11).
+            if not _due(conn, corr["condition_id"], "m6_consistency", config, None, now=now):
+                not_due += 1
                 continue
             dbmod.append_forecast(conn, {
                 "ts": ts,
                 "condition_id": corr["condition_id"],
                 "model_id": "m6_consistency",
                 "p_yes": min(hi, max(lo, corr["p_coherent"])),
-                "p_market_at_ts": row["mid"],
-                "spread_at_ts": row["spread"],
+                "p_market_at_ts": corr["p_market"],
+                "spread_at_ts": corr.get("spread"),
             })
             written += 1
     if skipped_null_control:
         log.info("m6: skipped sports markets outside the null-control sample",
                  extra={"ctx": {"count": skipped_null_control}})
+    if not_due:
+        log.info("m6: skipped markets already forecast today", extra={"ctx": {"count": not_due}})
     conn.commit()
     return written

@@ -1783,3 +1783,40 @@ on any outcome. The forecasts that were written are valid and stay in every stat
 no exclusion window is declared. On 10-10 the Polymarket tail markets are simply absent, which costs
 observations rather than validity. On 10-11 they were forecast about three hours later than the rest
 of the venue. Nothing in this addendum rests on any outcome or skill estimate.
+
+**Addendum 9.44 (2026-10-11).** M6 and M7 now follow the calendar-day rule, and M6 computes
+coherence only over events whose every open leg is freshly priced. Both changes are forward-only,
+from the forecast pass of 2026-10-12. None of H1–H3 rests on M6. H3's model is M7, which changes
+only in cadence.
+
+**Cadence.** 9.38 made "once a day" a calendar rule for the forecast pass. M6 and M7 write through
+their own paths, which had no due check, so a second pass on the same day wrote them again. That
+happened after the automatic catch-up passes of 10-07 and 10-09 (M7 on 49 and 49 markets, M6 on 30
+and 43) and after the manual pass of 10-11 that 9.43 records (179 and 37). Both models now apply the
+same rule as every other model. The rows already written stay in the ledger, and 9.5's
+`dedup_daily` check covers them.
+
+**M6's prices.** M6 summed each negRisk event's YES prices from the latest snapshot of each leg in
+the last two days. It applied no freshness bound, and it left out any leg it had no price for. A
+missing leg lowers the sum by that leg's own probability. M6 read the shortfall as incoherence and
+corrected it by raising every remaining leg.
+
+Measured on 2026-10-11 over the 38 negRisk events in Gamma's top 100 by volume:
+- **Old rule.** 33 events were scanned, and **25 of them left at least one open leg out of the sum**.
+  **14** were flagged incoherent, with **51** corrections.
+- **New rule.** Every open leg must be priced within guardrail 13's bound for its tier. Closed legs
+  are left out, because they cannot win. Any other gap skips the event. Under this rule **7** events
+  are scanned, and **none** is incoherent.
+
+M6 also now pairs each row against the price its coherent value was computed from, rather than a
+later re-read of the archive, as 9.18 made M4 do.
+
+**What this means for M6's record.** M6's forecasts before this date came mostly from incomplete
+sums. Their corrections were driven by legs that had no price, or only a stale one, and not by
+incoherence among prices that existed. They stay in the ledger and in M6's statistics, and those
+statistics should be read with this caveat. M4 pools M6 on the markets M6 wrote, so M4's record
+carries a small share of the same effect. No pre-registered hypothesis depends on M6.
+
+**What was seen before this was written.** Only counts were looked at: the events scanned, flagged
+and corrected under each rule, and the same-day duplicates. No skill statistic of M6, M7 or M4 was
+consulted.
