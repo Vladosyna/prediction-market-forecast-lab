@@ -1740,3 +1740,46 @@ Kalshi is unchanged at 150 and projects to roughly 850 scoreable clusters at the
 - the number of resolved, scoreable null-control clusters per venue.
 
 No null-control skill estimate, Brier value or confidence sequence was consulted.
+
+**Addendum 9.43 (2026-10-11).** Polymarket's tail tier was skipped as stale at the 02:00 forecast
+pass on 2026-10-10 and 2026-10-11. This records the loss, its cause and the fix. No exclusion window
+is declared, for the reason 9.39 gave.
+
+**What happened.** A tail snapshot row is labelled with the hour its round started in, and guardrail
+13 measures a snapshot's age from that label. The Polymarket tail round runs once an hour and takes
+about ten minutes. Its minute within the hour was whatever minute the collector process had last
+started at. A restart at 15:58 on 2026-10-09, made to deploy a change, put the round at :58. At the
+02:00 pass on 10-10 and 10-11 a round was still running (01:58–02:08 and 01:58–02:07), so the newest
+complete round carried the 00:00 label. By guardrail 13's clock that was 120 minutes against a
+90-minute bound; in fact it was about 62.
+
+The pass skipped **1,281** and **1,286** markets as stale. Polymarket's non-sports daily coverage
+fell from 1,346 markets on 10-09 to **619** on 10-10 and **636** on 10-11. 9.39 recorded the same
+mechanism for Kalshi's liquid tier.
+
+The 896 markets skipped as stale at the 10-09 pass are not attributed here: that night's round
+finished before the pass read, and most of those markets were forecast by the automatic catch-up
+pass at 06:06 the same day.
+
+**The fix.** From 04:59 UTC on 2026-10-11 the Polymarket tail round is anchored at five minutes past
+each hour, whenever the process started. With rounds of about ten minutes, the newest complete round
+is never labelled more than about 75 minutes back. The same day, after the 05:05 round, a single
+catch-up pass at 05:13 UTC skipped 38 markets as stale, against 1,286 that night. It forecast
+1,029 markets that had not yet been forecast on 10-11 (4,134 rows), under the ordinary
+calendar-day rule (9.38) and as the automatic catch-up after a restart does. 10-10 cannot be
+recovered.
+
+**A second finding from that pass.** The core models respect the calendar-day rule. M6 and M7
+do not: their write paths have no due check, so any second pass in a day writes them again. The
+catch-up wrote second same-day forecasts for **179** markets under M7 and **37** under M6. The
+automatic catch-up passes after restarts did the same on 10-07 (M7 49, M6 30) and 10-09 (M7 49,
+M6 43), so the defect predates this addendum. These rows are individually valid, each with its
+own timestamp and its own paired price. 9.5's `dedup_daily` robustness check, the first forecast
+per market, model and UTC day, already removes them, and it is reported beside the primary
+statistics.
+
+**Standing under this plan.** Whether a market was skipped depended on its tier and on the clock, not
+on any outcome. The forecasts that were written are valid and stay in every statistic. As in 9.39,
+no exclusion window is declared. On 10-10 the Polymarket tail markets are simply absent, which costs
+observations rather than validity. On 10-11 they were forecast about three hours later than the rest
+of the venue. Nothing in this addendum rests on any outcome or skill estimate.
