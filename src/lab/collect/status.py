@@ -186,6 +186,12 @@ def memory_budget(units: tuple[str, ...] = LAB_UNITS) -> dict[str, Any] | None:
 COVERAGE_LOOKBACK_DAYS = 14
 COVERAGE_MIN_BASELINE = 20      # below this a median is noise, not a baseline
 COVERAGE_ALERT_RATIO = 0.5      # a day under half a model's own trailing median
+# Models whose output is event-driven, so a day of zero is their normal state.
+# M6 writes only when a complete, freshly priced negRisk event is incoherent
+# (PAP 9.44); on 2026-10-11 none of the 7 such events was. Its old ~40 a day
+# came mostly from incomplete sums, so its trailing median would keep raising
+# the coverage alarm -- and the heartbeat's /fail -- for a fortnight.
+COVERAGE_EVENT_DRIVEN_MODELS = frozenset({"m6_consistency"})
 
 
 def coverage_regressions(conn, day: str | None = None,
@@ -229,6 +235,8 @@ def coverage_regressions(conn, day: str | None = None,
 
     out: list[dict[str, Any]] = []
     for (model_id, venue), by_day in sorted(series.items()):
+        if model_id in COVERAGE_EVENT_DRIVEN_MODELS:
+            continue
         prior = sorted(n for d, n in by_day.items() if d < target)[-lookback:]
         if len(prior) < 3:
             continue

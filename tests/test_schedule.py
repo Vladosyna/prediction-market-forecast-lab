@@ -401,6 +401,25 @@ def test_coverage_watchdog_catches_a_silent_collapse(tmp_path):
     conn.close()
 
 
+def test_coverage_watchdog_leaves_event_driven_m6_alone(tmp_path):
+    """After PAP 9.44 M6 writes only on complete, incoherent events -- none on
+    2026-10-12 against a trailing median of 40 built mostly from incomplete
+    sums. Flagging that raised the heartbeat's /fail for a model doing its job."""
+    from lab.collect.status import coverage_regressions
+    from lab.store import db
+
+    conn = db.connect(tmp_path / "lab.db")
+    _seed_coverage(conn, "m6_consistency", "polymarket", days=10, n=40)
+    _seed_coverage(conn, "m0_market", "polymarket", days=10, n=40)
+    for j in range(40):
+        db.append_forecast(conn, {"ts": "2026-08-21T02:00:00+00:00", "condition_id": f"ok{j}",
+                                  "model_id": "m0_market", "p_yes": 0.5, "p_market_at_ts": 0.5})
+    conn.commit()
+
+    assert coverage_regressions(conn, day="2026-08-21") == []
+    conn.close()
+
+
 def test_coverage_watchdog_ignores_small_and_sleeping_models(tmp_path):
     """Coverage varies by design -- M5 covers only weather/macro, M7 only
     matched pairs -- so each series is compared against ITSELF, and a series
