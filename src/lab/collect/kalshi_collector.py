@@ -731,16 +731,27 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
     # bulk response omits is fetched singly, exactly as before.
     prefetched = await _prefetch_markets(
         kalshi, [r["venue_native_id"] for r in candidates], asyncio.Semaphore(4))
+    # Every market the bulk response omitted is fetched BEFORE anything is
+    # written, so no write transaction is open across a network wait. Until
+    # 2026-10-12 these single fetches ran inside the loop below, under a batch
+    # of up to 100 uncommitted resolutions; one cycle held the write lock past
+    # the 30 s busy timeout and the nightly forecast pass, writing in another
+    # process, died on `database is locked` at 02:32.
+    for row in candidates:
+        ticker = row["venue_native_id"]
+        if ticker in prefetched:
+            continue
+        try:
+            fetched = await kalshi.market(ticker)
+        except Exception:
+            log.warning("kalshi resolutions: fetch failed",
+                        extra={"ctx": {"condition_id": row["condition_id"]}})
+            continue
+        if fetched is not None:
+            prefetched[ticker] = fetched
     for row in candidates:
         condition_id, ticker = row["condition_id"], row["venue_native_id"]
         m = prefetched.get(ticker)
-        if m is None:
-            try:
-                m = await kalshi.market(ticker)
-            except Exception:
-                log.warning("kalshi resolutions: fetch failed",
-                            extra={"ctx": {"condition_id": condition_id}})
-                continue
         if m is None:
             continue
         payout_yes = extract_kalshi_payout(m)
@@ -755,8 +766,8 @@ async def watch_kalshi_resolutions(kalshi: KalshiClient, conn, limit: int = 200)
             venue_resolved_ts=parse_venue_ts(m.settlement_ts),
         )
         recorded += 1
-        # Commit in batches: the scan no longer waits on the network between
-        # candidates, so a write transaction here stays short either way.
+        # Commit in batches: nothing in this loop waits on the network, so a
+        # write transaction here stays short either way.
         if recorded % 100 == 0:
             conn.commit()
     if conn.in_transaction:

@@ -242,6 +242,38 @@ def test_watch_kalshi_resolutions_records_and_is_idempotent(tmp_path):
     conn.close()
 
 
+def test_kalshi_watcher_never_waits_on_the_network_inside_a_write(tmp_path):
+    """2026-10-12 02:32: a market the bulk response omitted was fetched singly
+    while up to 100 recorded resolutions sat uncommitted, the write lock
+    outlived the 30 s busy timeout, and the nightly forecast pass -- writing
+    from another process -- died on `database is locked`."""
+    conn = db.connect(tmp_path / "lab.db")
+    for ticker, checked in (("T1", "2026-10-01T00:00:00+00:00"), ("T2", "2026-10-02T00:00:00+00:00")):
+        db.upsert_market(conn, {
+            "condition_id": f"kalshi:{ticker}", "venue": "kalshi", "venue_native_id": ticker,
+            "slug": None, "question": "q", "category": "economics", "description": "d",
+            "end_date_iso": "2026-01-01T00:00:00Z", "token_id_yes": None, "token_id_no": None,
+            "neg_risk": 0, "active": 0, "closed": 1, "liquidity_num": 1.0, "volume_num": 1.0,
+            "tier": "tail",
+        })
+        conn.execute("UPDATE markets SET resolution_checked_ts = ? WHERE condition_id = ?",
+                     (checked, f"kalshi:{ticker}"))
+    conn.commit()
+    open_during_fetch = []
+
+    class Client:
+        async def markets_by_tickers(self, tickers):      # T1 comes back in bulk, T2 does not
+            return {"T1": _market(ticker="T1", status="finalized", result="yes")}
+
+        async def market(self, ticker):
+            open_during_fetch.append(conn.in_transaction)
+            return _market(ticker=ticker, status="finalized", result="no")
+
+    assert asyncio.run(watch_kalshi_resolutions(Client(), conn)) == 2
+    assert open_during_fetch == [False], "a single fetch ran inside an open write transaction"
+    conn.close()
+
+
 def test_watch_kalshi_resolutions_skips_unsettled(tmp_path):
     conn = db.connect(tmp_path / "lab.db")
     db.upsert_market(conn, {
