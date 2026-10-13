@@ -4222,6 +4222,24 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xf9a646015bbf0c35b5de4bd4d69a5c78edf65c1c94b05104717237de154fc173'
+  question: Hailee Steinfeld as Kate Bishop?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-HAI
+  external_question: 'Will Hailee Steinfeld perform as Kate Bishop in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same specific outcome: whether Hailee Steinfeld
+    appears/plays Kate Bishop in Avengers: Doomsday. The Polymarket question asks
+    ''Hailee Steinfeld as Kate Bishop?'' and its criteria resolve Yes if the listed
+    actor playing the listed character appears in the film, based on official announcements
+    or credible reporting. The Kalshi market''s specific outcome (per ticker/labels)
+    is ''Hailee Steinfeld as Kate Bishop?'' resolving Yes if she performs/is announced
+    as Kate Bishop. Same event, same character, same film, same resolution trigger.'
+  confidence: 0.95
+  proposed_ts: '2026-10-13T21:00:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
