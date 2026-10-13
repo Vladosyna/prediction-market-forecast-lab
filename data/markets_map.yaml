@@ -4200,6 +4200,28 @@ proposed:
     \ thresholds (3.0 vs 2.5); related but not the same event resolution."
   confidence: 0.55
   proposed_ts: '2026-10-12T09:02:46+00:00'
+- condition_id: '0x863facc8c2f681bce7b04e6d7153c2aa46e0f9482cbba23c2456dc1dd4c72b1c'
+  question: Will the Republican Party win the NY-14 House seat?
+  venue: kalshi
+  external_id: KXHOUSERACE-NY14-26-R
+  external_question: Will Republican win the House race for NY-14?
+  rationale: 'Both markets resolve on the same real-world event: which party wins/controls
+    the NY-14 House seat in the 2026 midterm elections. Polymarket resolves to ''Yes''
+    if the Republican Party wins the NY-14 seat; Kalshi''s specific outcome (''Diamant
+    Hysenaj'' = the Republican nominee) resolves to Yes if the House member sworn
+    in for NY-14 for the term beginning in 2027 is a Republican. The party-control
+    outcome is equivalent. Minor caveats: Kalshi keys off the member sworn in for
+    the 2027 term rather than the election-day winner, and Polymarket has fallback
+    provisions for party affiliation/caucus intent; these edge cases are unlikely
+    to diverge and don''t override the substantive identity. Confidence moderately
+    high but below the tool''s 0.95 due to the slight timing/mechanism differences
+    and the unusual candidate-name outcome label.'
+  confidence: 0.85
+  proposed_ts: '2026-10-13T15:28:49+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
