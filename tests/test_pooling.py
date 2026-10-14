@@ -310,3 +310,45 @@ def test_price_moves_24h_projects_columns_too():
 
     src = inspect.getsource(fc.price_moves_24h)
     assert "read_range(dates, columns=" in src, "unprojected snapshot read is back"
+
+
+def test_streamed_pairwise_correlation_matches_numpy(tmp_path):
+    """2026-10-14: the per-pair correlation used to fetchall() every forecast
+    of every pooled model (~2M rows) and peaked the monthly learn run at
+    935 MB. It now streams in (condition_id, ts) order with running
+    co-moments; the coefficient must be the one np.corrcoef gives, whatever
+    order the rows were written in."""
+    import random
+
+    from lab.learn.pooling import _pairwise_logit_correlations_by_category
+
+    conn = db.connect(tmp_path / "lab.db")
+    rng = random.Random(7)
+    rows, points = [], {}
+    for i in range(80):
+        cid = f"0x{i:03d}"
+        conn.execute("INSERT INTO markets (condition_id, category) VALUES (?, ?)",
+                     (cid, "politics" if i % 2 else "economics"))
+        for day in range(3):
+            ts = f"2026-10-0{day + 1}T02:00:00+00:00"
+            base = rng.uniform(0.1, 0.9)
+            for model in ("ma", "mb", "mc"):
+                if model == "mc" and rng.random() < 0.3:
+                    continue
+                p = min(0.98, max(0.02, base + rng.uniform(-0.08, 0.08)))
+                rows.append((ts, cid, model, p))
+                points.setdefault(("politics" if i % 2 else "economics", cid, ts), {})[model] = p
+    rng.shuffle(rows)
+    for ts, cid, model, p in rows:
+        db.append_forecast(conn, {"ts": ts, "condition_id": cid, "model_id": model,
+                                  "p_yes": p, "p_market_at_ts": 0.5})
+    conn.commit()
+
+    got = _pairwise_logit_correlations_by_category(conn, ("ma", "mb", "mc"), min_pairs=10)
+    for cat in ("politics", "economics"):
+        for a, b in (("ma", "mb"), ("ma", "mc"), ("mb", "mc")):
+            pts = [v for (c, _, _), v in points.items() if c == cat and a in v and b in v]
+            xs = logit(np.array([v[a] for v in pts]))
+            ys = logit(np.array([v[b] for v in pts]))
+            assert got[cat][(a, b)] == pytest.approx(float(np.corrcoef(xs, ys)[0, 1]), abs=1e-9)
+    conn.close()

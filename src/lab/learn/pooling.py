@@ -226,40 +226,55 @@ def _pairwise_logit_correlations_by_category(
     (per-pair, Phase 14.1's cluster-aware ceiling) -- one query/pairing pass,
     two different reductions over the same per-pair values.
     """
-    rows = conn.execute(
+    # Streamed in (condition_id, ts) order, each matched point folded into
+    # running co-moments per (category, pair) as it goes (2026-10-14). This
+    # used to fetchall() every forecast of every pooled model -- ~2M rows as
+    # Python objects -- and hold them in a dict of dicts: the monthly learn
+    # run peaked at 935 MB in this one step and was OOM-killed at its 900 MB
+    # cap, and the nightly MWU calls it once per category. Same Pearson
+    # coefficient, computed with Welford's update instead of np.corrcoef.
+    cursor = conn.execute(
         """
         SELECT f.condition_id, f.ts, f.model_id, f.p_yes, m.category AS category
         FROM forecasts f JOIN markets m ON m.condition_id = f.condition_id
         WHERE f.model_id IN ({})
+        ORDER BY f.condition_id, f.ts
         """.format(",".join("?" for _ in model_ids)),
         model_ids,
-    ).fetchall()
+    )
+    # (category, (a, b)) -> [n, mean_x, mean_y, m2_x, m2_y, c_xy]
+    moments: dict[tuple[str, tuple[str, str]], list[float]] = {}
 
-    by_category: dict[str, dict[tuple[str, str], dict[str, float]]] = {}
-    for r in rows:
-        cat = r["category"] or "unknown"
-        key = (r["condition_id"], r["ts"])
-        by_category.setdefault(cat, {}).setdefault(key, {})[r["model_id"]] = float(logit(r["p_yes"]))
+    def fold(cat: str, logits_by_model: dict[str, float]) -> None:
+        for a, b in itertools.combinations(sorted(logits_by_model), 2):
+            x, y = logits_by_model[a], logits_by_model[b]
+            m = moments.setdefault((cat, (a, b)), [0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            m[0] += 1
+            dx = x - m[1]
+            m[1] += dx / m[0]
+            dy = y - m[2]
+            m[2] += dy / m[0]
+            m[3] += dx * (x - m[1])
+            m[4] += dy * (y - m[2])
+            m[5] += dx * (y - m[2])
+
+    key = cat = None
+    point: dict[str, float] = {}
+    for r in cursor:
+        k = (r["condition_id"], r["ts"])
+        if k != key:
+            if point:
+                fold(cat, point)
+            key, cat, point = k, r["category"] or "unknown", {}
+        point[r["model_id"]] = float(logit(r["p_yes"]))
+    if point:
+        fold(cat, point)
 
     out: dict[str, dict[tuple[str, str], float]] = {}
-    for cat, points in by_category.items():
-        pair_logits: dict[tuple[str, str], list[tuple[float, float]]] = {}
-        for logits_by_model in points.values():
-            present = sorted(logits_by_model)
-            for a, b in itertools.combinations(present, 2):
-                pair_logits.setdefault((a, b), []).append((logits_by_model[a], logits_by_model[b]))
-
-        pair_corr: dict[tuple[str, str], float] = {}
-        for pair, values in pair_logits.items():
-            if len(values) < min_pairs:
-                continue
-            xs = np.array([v[0] for v in values])
-            ys = np.array([v[1] for v in values])
-            if np.std(xs) == 0 or np.std(ys) == 0:
-                continue
-            pair_corr[pair] = float(np.corrcoef(xs, ys)[0, 1])
-        if pair_corr:
-            out[cat] = pair_corr
+    for (cat, pair), (n, _, _, m2x, m2y, cxy) in moments.items():
+        if n < min_pairs or m2x <= 0 or m2y <= 0:
+            continue
+        out.setdefault(cat, {})[pair] = float(cxy / np.sqrt(m2x * m2y))
     return out
 
 
@@ -322,24 +337,32 @@ def estimate_rho_bar_m7(conn, store, config: dict[str, Any],
     pair_cids = {cid for cid in by_cid}
     for pairs in by_cid.values():
         pair_cids |= {dbmod.venue_condition_id(p["venue"], p["external_id"]) for p in pairs}
-    df = store.read_range(dates, columns=["ts", "condition_id", "mid"],
-                          condition_ids=pair_cids)
-    if df.is_empty():
+    # One day at a time, each reduced to its last mid per market before the
+    # next is read (2026-10-14): the pairs' legs are snapshotted every two
+    # minutes, and with 404 confirmed pairs the 90-day read of every row
+    # peaked this step at ~1.07 GB and OOM-killed the monthly learn run.
+    # Only the last value per market and day is used below, so the result is
+    # the same.
+    import polars as pl
+
+    days = []
+    for date in dates:
+        day = store.read_range([date], columns=["ts", "condition_id", "mid"],
+                               condition_ids=pair_cids)
+        if not day.is_empty():
+            days.append(day.sort("ts").group_by("condition_id").last()
+                        .with_columns(pl.lit(date).alias("_date")))
+    if not days:
         return None
+    df = pl.concat(days, how="diagonal")
 
     correlations = []
     for cid, pairs in by_cid.items():
         external_cids = [dbmod.venue_condition_id(p["venue"], p["external_id"]) for p in pairs]
         all_cids = [cid, *external_cids]
-        subset = df.filter(df["condition_id"].is_in(all_cids))
-        if subset.is_empty():
+        daily = df.filter(df["condition_id"].is_in(all_cids))
+        if daily.is_empty():
             continue
-        daily = (
-            subset.with_columns(subset["ts"].str.slice(0, 10).alias("_date"))
-            .sort("ts")
-            .group_by(["condition_id", "_date"])
-            .last()
-        )
         by_cid_date: dict[str, dict[str, float]] = {}
         for row in daily.to_dicts():
             if row["mid"] is None:
