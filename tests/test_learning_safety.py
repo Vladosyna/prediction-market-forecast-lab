@@ -373,3 +373,22 @@ def test_m4_weight_fit_never_emits_a_null_category(tmp_path):
     assert None not in art["categories"]
     assert "null" not in art["categories"]
     conn.close()
+
+
+def test_a_selective_apply_writes_only_the_named_keys(config):
+    """PAP 9.45: `lab learn --apply --only` refits what no hypothesis rests on
+    and leaves the hypotheses' model versions frozen to the analysis instant.
+    A key outside the set must not even be registered -- `_process_challenger`
+    registers every refit it applies, promoted or not."""
+    from lab.learn.loop import _process_challenger
+
+    conn = db.connect(config["storage"]["db_path"])
+    only = frozenset({"m2_baserates"})
+    applied = _process_challenger(conn, config, "m2_baserates", {"kind": "m2_baserates", "rates": {}},
+                                  [], None, apply=only, auto=True)
+    held = _process_challenger(conn, config, "m5_macro_sd", {"kind": "m5_macro_sd", "series": {}},
+                               [], None, apply=only, auto=True)
+    assert "version_id" in applied and "version_id" not in held
+    rows = {r["model_id"] for r in conn.execute("SELECT model_id FROM model_versions")}
+    assert rows == {"m2_baserates"}
+    conn.close()

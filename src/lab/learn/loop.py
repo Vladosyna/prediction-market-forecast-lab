@@ -450,6 +450,20 @@ def fit_m1_hier_walk_forward(train: list[dict], validation: list[dict]) -> dict[
 
 # --- challenger registration + promotion decision -------------------------
 
+# Keys a learn run may write, for `lab learn --apply --only` (PAP 9.45).
+LEARNABLE_KEYS = frozenset({
+    "m1_curves", "m1_hier_curves", "m2_baserates", "m4_weights", "m5_macro_sd",
+    "m3_params", "m4_extremization", "m7_extremization",
+})
+
+
+def _applies(apply: bool | frozenset[str], model_key: str) -> bool:
+    """`apply` is True (write everything) or the set of keys a selective run
+    may write (2026-10-14, PAP 9.45: refit what no hypothesis rests on, keep
+    the hypotheses' versions frozen to the analysis instant)."""
+    return apply is True or (isinstance(apply, frozenset) and model_key in apply)
+
+
 def _process_challenger(
     conn,
     config: dict[str, Any],
@@ -458,7 +472,7 @@ def _process_challenger(
     holdout: list[dict],
     predict_fn: Callable[[dict, dict], float] | None,
     *,
-    apply: bool,
+    apply: bool | frozenset[str],
     auto: bool = False,
     fit_window: tuple[str | None, str | None] = (None, None),
 ) -> dict[str, Any]:
@@ -487,7 +501,7 @@ def _process_challenger(
                                    alpha=_cs_alpha(config))
         decision.update(promoted=ok, **stats)
 
-    if apply:
+    if _applies(apply, model_key):
         path = save_artifact(config, model_key, artifact, promote=False)
         vid = registry.register_version(conn, config, model_key, path, fit_window=fit_window)
         decision["version_id"] = vid
@@ -499,7 +513,7 @@ def _process_challenger(
 
 # --- M1 / M2 / M4 scheduled refits ----------------------------------------
 
-def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> dict[str, Any]:
+def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool | frozenset[str]) -> dict[str, Any]:
     """M1 curves (CI-gated), M2 base rates + M4 weights + M5 macro sd (auto, reward signal)."""
     import os
 
@@ -594,7 +608,7 @@ def refit_statistical_models(conn, config: dict[str, Any], *, apply: bool) -> di
 
 # --- extremization exponent fit (Phase 13) ---------------------------------
 
-def fit_m4_extremization(conn, config: dict[str, Any], *, apply: bool = False) -> dict[str, Any]:
+def fit_m4_extremization(conn, config: dict[str, Any], *, apply: bool | frozenset[str] = False) -> dict[str, Any]:
     """Per-category extremization exponent for M4's pool (Phase 13, CLAUDE.md
     M4/M7 extremization). Walk-forward per category: the oldest 80% of each
     category's resolved m4_ensemble forecasts fits the grid search (brief
@@ -638,7 +652,7 @@ def fit_m4_extremization(conn, config: dict[str, Any], *, apply: bool = False) -
     return decision
 
 
-def fit_m7_extremization(conn, config: dict[str, Any], *, apply: bool = False) -> dict[str, Any]:
+def fit_m7_extremization(conn, config: dict[str, Any], *, apply: bool | frozenset[str] = False) -> dict[str, Any]:
     """Single overall extremization exponent for M7's external pool (Phase
     13) -- confirmed cross-venue pairs are few (Phase 9's own acceptance bar
     was only >=5), so a per-category split would starve every cell; one
@@ -700,7 +714,7 @@ def replay_brier(runs: list[dict], k: float, tau: float, cap: float) -> float:
     return float(np.mean(scores)) if scores else float("inf")
 
 
-def fit_m3_aggregator(conn, config: dict[str, Any], *, apply: bool = False) -> dict[str, Any] | None:
+def fit_m3_aggregator(conn, config: dict[str, Any], *, apply: bool | frozenset[str] = False) -> dict[str, Any] | None:
     """Walk-forward grid search over (k, tau, cap); gated on min resolved runs.
 
     Fits only on the training split; the newest split is the out-of-sample
@@ -742,7 +756,7 @@ def fit_m3_aggregator(conn, config: dict[str, Any], *, apply: bool = False) -> d
 
 # --- rollback circuit breaker (brief section 6) ---------------------------
 
-def run_rollback_checks(conn, config: dict[str, Any], *, apply: bool) -> list[dict[str, Any]]:
+def run_rollback_checks(conn, config: dict[str, Any], *, apply: bool | frozenset[str]) -> list[dict[str, Any]]:
     """Revert a freshly promoted champion that has degraded over its trailing window.
 
     For each model with a promoted active version and a prior promotable version,
@@ -778,7 +792,7 @@ def run_rollback_checks(conn, config: dict[str, Any], *, apply: bool) -> list[di
                                          alpha=_cs_alpha(config))
         entry: dict[str, Any] = {"model": model_key, "degraded": degraded, "window": len(holdout),
                                  **stats}
-        if degraded and apply:
+        if degraded and _applies(apply, model_key):
             restored = registry.rollback(conn, config, model_key, reason="rollback")
             entry["rolled_back_to"] = restored["version_tag"] if restored else None
         out.append(entry)
@@ -787,7 +801,7 @@ def run_rollback_checks(conn, config: dict[str, Any], *, apply: bool) -> list[di
 
 # --- top-level ------------------------------------------------------------
 
-def run_learn(conn, config: dict[str, Any], llm=None, *, apply: bool = False) -> dict[str, Any]:
+def run_learn(conn, config: dict[str, Any], llm=None, *, apply: bool | frozenset[str] = False) -> dict[str, Any]:
     """Monthly loop. Dry-run by default; writes to model_versions only under apply.
 
     Refuses to run while data/PAUSE exists (the same kill switch the collector
@@ -801,17 +815,18 @@ def run_learn(conn, config: dict[str, Any], llm=None, *, apply: bool = False) ->
         log.warning("learn: PAUSE file present -- refusing to run")
         return {"ts": now_utc_iso(), "skipped": "paused"}
 
-    summary: dict[str, Any] = {"ts": now_utc_iso(), "apply": apply}
+    summary: dict[str, Any] = {"ts": now_utc_iso(),
+                               "apply": sorted(apply) if isinstance(apply, frozenset) else apply}
     summary["rollbacks"] = run_rollback_checks(conn, config, apply=apply)
     summary["refits"] = refit_statistical_models(conn, config, apply=apply)
     summary["m3_aggregator"] = fit_m3_aggregator(conn, config, apply=apply)
     summary["m4_extremization"] = fit_m4_extremization(conn, config, apply=apply)
     summary["m7_extremization"] = fit_m7_extremization(conn, config, apply=apply)
-    if apply:
+    if apply is True:   # post-mortems cost LLM budget; a selective run skips them
         from lab.learn.postmortem import run_postmortems
         summary["postmortems"] = run_postmortems(conn, config, llm)
     else:
-        summary["postmortems"] = "skipped (dry-run)"
+        summary["postmortems"] = "skipped (dry-run or --only)"
     log.info("learn complete", extra={"ctx": {"apply": apply,
                                               "rollbacks": summary["rollbacks"]}})
     return summary

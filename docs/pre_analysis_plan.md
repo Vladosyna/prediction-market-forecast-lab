@@ -1820,3 +1820,48 @@ carries a small share of the same effect. No pre-registered hypothesis depends o
 **What was seen before this was written.** Only counts were looked at: the events scanned, flagged
 and corrected under each rule, and the same-day duplicates. No skill statistic of M6, M7 or M4 was
 consulted.
+
+**Addendum 9.45 (2026-10-14).** Until the 9.40 analysis instant (2027-01-31), the monthly learning
+loop is applied only to models that no hypothesis rests on. It is first applied today, to
+`m2_baserates`, `m4_weights` and `m3_params`.
+
+**Why.** `CLAUDE.md` §6 has `lab learn` propose and a human apply, and nothing had been applied
+since 2026-08-02: the runs of 09-01 and 10-01 were dry runs. That leaves two aims pulling against
+each other.
+- Learning exists to improve the forecasts.
+- §6 of this plan rests the confirmatory claims for H1 and H2 on "already-fit, already-frozen" model
+  versions, and starts each new version's track record at its own `registered_ts`.
+
+A new version of a hypothesis model therefore restarts that model's confirmatory record weeks
+before the analysis. The models carrying hypotheses are `m1_curves` and `m1_hier_curves` (H1, H2),
+`m5_macro_sd` (H2) and M7's extremization (H3). They stay at their current versions until the
+analysis instant.
+
+The dry run of 2026-10-14 would not have changed most of them in any case:
+- `m1_curves` and `m1_hier_curves` failed their own promotion gate, with the challenger-vs-champion
+  sequence covering zero.
+- `m4_extremization`'s interval covered zero.
+- `m7_extremization` had too little data.
+
+The one hypothesis model held back by this rule rather than by its gate is `m5_macro_sd`, which
+promotes without a gate.
+
+**What is applied.**
+- `m2_baserates`: M2's category base rates.
+- `m4_weights`: the ensemble's weights.
+- `m3_params`: the M3 aggregator's first fit, k = 0.08, τ = 3 days, cap 1.2, walk-forward on 770
+  resolved runs.
+
+None of M2, M3 or M4 carries a hypothesis. Forecasts from the pass of 2026-10-15 use the new
+versions, and each version's record starts at its own `registered_ts` (§6, guardrail 18). M4's
+series and the shadow portfolio, which trades on M4, therefore change at that date. Their P&L and
+skill should not be read across it unmarked. The rollback circuit breaker still watches the applied
+keys. Post-mortems, which cost LLM budget, are left to a full `--apply`.
+
+**How.** `lab learn --apply --only <keys>` writes only the named keys and leaves everything else a
+dry run. Any further application before 2027-01-31 uses the same three keys or a subset of them.
+
+**What was seen before this was written.** The dry run prints each challenger's comparison with its
+champion on the holdout the gate uses. Those comparisons are between versions of one model, not
+skill against the market, and the rule above follows from which models carry hypotheses, not from
+those numbers. No market-skill statistic was consulted.

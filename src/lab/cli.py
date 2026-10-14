@@ -466,6 +466,12 @@ def learn(
         help="Persist refits and promote/rollback versions. Default is a dry-run diff "
              "that writes nothing (brief section 6).",
     ),
+    only: str | None = typer.Option(
+        None, "--only",
+        help="With --apply: write only these model keys, comma-separated (e.g. "
+             "m2_baserates,m4_weights,m3_params); everything else stays a dry-run and "
+             "post-mortems are skipped. PAP 9.45 keeps the hypotheses' versions frozen.",
+    ),
 ) -> None:
     """Monthly learning loop: batch refits, champion/challenger, post-mortems.
 
@@ -473,9 +479,20 @@ def learn(
     touching model_versions or ACTIVE.json. Pass --apply to commit.
     """
     from lab.jobs import run_learn_job
+    from lab.learn.loop import LEARNABLE_KEYS
 
-    summary = run_learn_job(load_config(), apply=apply)
-    mode = "APPLIED" if apply else "DRY-RUN (nothing written; pass --apply to commit)"
+    target: bool | frozenset[str] = apply
+    if only is not None:
+        if not apply:
+            raise typer.BadParameter("--only needs --apply")
+        keys = frozenset(k.strip() for k in only.split(",") if k.strip())
+        unknown = keys - LEARNABLE_KEYS
+        if unknown or not keys:
+            raise typer.BadParameter(f"unknown keys {sorted(unknown)}; known: {sorted(LEARNABLE_KEYS)}")
+        target = keys
+    summary = run_learn_job(load_config(), apply=target)
+    mode = ("APPLIED " + ",".join(sorted(target)) if isinstance(target, frozenset)
+            else "APPLIED" if apply else "DRY-RUN (nothing written; pass --apply to commit)")
     typer.echo(f"learn [{mode}]: {summary}")
 
 

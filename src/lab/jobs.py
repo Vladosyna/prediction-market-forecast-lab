@@ -134,7 +134,7 @@ def run_shadow_job(config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def run_learn_job(config: dict[str, Any], apply: bool = False) -> Any:
+def run_learn_job(config: dict[str, Any], apply: bool | frozenset[str] = False) -> Any:
     """Monthly learning loop: batch refits, champion/challenger, post-mortems.
 
     Dry-run by default (writes nothing); pass apply=True to persist and promote.
