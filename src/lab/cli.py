@@ -479,7 +479,9 @@ def learn(
     touching model_versions or ACTIVE.json. Pass --apply to commit.
     """
     from lab.jobs import run_learn_job
-    from lab.learn.loop import LEARNABLE_KEYS
+    from lab.eval.run import CONFIRMATORY_AS_OF
+    from lab.learn.loop import FROZEN_UNTIL_ANALYSIS, LEARNABLE_KEYS
+    from lab.util import now_utc_iso
 
     target: bool | frozenset[str] = apply
     if only is not None:
@@ -489,6 +491,11 @@ def learn(
         unknown = keys - LEARNABLE_KEYS
         if unknown or not keys:
             raise typer.BadParameter(f"unknown keys {sorted(unknown)}; known: {sorted(LEARNABLE_KEYS)}")
+        frozen = keys & FROZEN_UNTIL_ANALYSIS
+        if frozen and now_utc_iso() < CONFIRMATORY_AS_OF:
+            raise typer.BadParameter(
+                f"{sorted(frozen)} carry hypotheses and stay frozen until {CONFIRMATORY_AS_OF} "
+                "(PAP 9.45)")
         target = keys
     summary = run_learn_job(load_config(), apply=target)
     mode = ("APPLIED " + ",".join(sorted(target)) if isinstance(target, frozenset)

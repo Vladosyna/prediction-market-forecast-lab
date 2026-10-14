@@ -1865,3 +1865,25 @@ dry run. Any further application before 2027-01-31 uses the same three keys or a
 champion on the holdout the gate uses. Those comparisons are between versions of one model, not
 skill against the market, and the rule above follows from which models carry hypotheses, not from
 those numbers. No market-skill statistic was consulted.
+
+**Addendum 9.46 (2026-10-14).** The monthly learning run applies 9.45's three keys on its own.
+`CLAUDE.md` §6 has a human apply each cycle. From 2026-11-01 the scheduled run (`lab-learn.timer`,
+the 1st at 08:30 UTC) is `lab learn --apply --only m2_baserates,m4_weights,m3_params`. That is the
+set 9.45 applied by hand: the models no hypothesis rests on.
+
+**What does not change.**
+- The run still computes and logs every model's proposed refit, the frozen ones included. Each cycle
+  therefore stays reviewable after the fact, in the service's journal.
+- The rollback circuit breaker still watches every applied key.
+- `m3_params` now has an incumbent, so its later refits pass the CI gate like any challenger.
+  `m2_baserates` and `m4_weights` promote without a gate, as §6 has always had them.
+- `lab learn` on the command line still defaults to a dry run.
+
+**The guard.** Before the 9.40 analysis instant the CLI refuses `--only` for `m1_curves`,
+`m1_hier_curves`, `m5_macro_sd` and `m7_extremization`, the models H1–H3 rest on. Neither a
+mistyped key list nor a hurried manual run can restart a hypothesis's confirmatory record.
+
+**What it touches.** H1–H3's statistics are untouched. M2 and M3 are members of M4, so each monthly
+application moves M4's forecasts, and with them the shadow portfolio that 9.41 reports beside H2
+(outside H2's decision rule). Every application has a `registered_ts` in `model_versions`, so each
+of those breaks is dated, and their series should be read with those dates marked.

@@ -49,7 +49,7 @@ loop: it has its own unit and timer, for cgroup-budget reasons spelled out in
 | `lab-collect.service` | Collector-only — **disabled since 2026-07-10**, kept for rollback | `uv run lab collect` |
 | `lab-dashboard.service` | Streamlit dashboard, loopback-only | `/root/.local/bin/uv run streamlit run src/lab/dashboard.py --server.port 8501 --server.address 127.0.0.1 --server.headless true` |
 | `pmxt-scan.timer` → `pmxt-scan.service` | pmxt Router scan, twice daily 05:00/17:00 UTC | `uv run --with pmxt python scripts/pmxt_router_scan.py` |
-| `lab-learn.timer` → `lab-learn.service` | **Monthly learning loop** (dry-run), 1st of the month 08:30 UTC (04:00 until 2026-10-14) | `uv run lab learn` |
+| `lab-learn.timer` → `lab-learn.service` | **Monthly learning loop**, 1st of the month 08:30 UTC (04:00 until 2026-10-14); applies only the non-hypothesis keys (PAP 9.46, from 2026-11-01), dry-run for the rest | `uv run lab learn --apply --only m2_baserates,m4_weights,m3_params` (ExecStart drop-in) |
 | `pmxt-verify.timer` → `pmxt-verify.service` | **Disabled** — `lab-run.service` schedules the verify pass itself (17:00/21:00 UTC). Kept for a host that runs the pmxt cycle without the orchestrator | `uv run lab map pmxt-verify` |
 | `results-pull.timer` → `results-pull.service` | **Disabled since 2026-07-10** — role reversed, see "Cutover" below | `git pull --ff-only origin main` |
 

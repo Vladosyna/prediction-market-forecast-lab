@@ -457,6 +457,14 @@ LEARNABLE_KEYS = frozenset({
 })
 
 
+# The models H1-H3 rest on (PAP 9.45). A selective apply refuses them before
+# the analysis instant -- the scheduled run applies automatically (PAP 9.46),
+# so a mistyped key list must not be able to restart a hypothesis's record.
+FROZEN_UNTIL_ANALYSIS = frozenset({
+    "m1_curves", "m1_hier_curves", "m5_macro_sd", "m7_extremization",
+})
+
+
 def _applies(apply: bool | frozenset[str], model_key: str) -> bool:
     """`apply` is True (write everything) or the set of keys a selective run
     may write (2026-10-14, PAP 9.45: refit what no hypothesis rests on, keep

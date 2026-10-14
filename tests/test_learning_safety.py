@@ -392,3 +392,20 @@ def test_a_selective_apply_writes_only_the_named_keys(config):
     rows = {r["model_id"] for r in conn.execute("SELECT model_id FROM model_versions")}
     assert rows == {"m2_baserates"}
     conn.close()
+
+
+def test_the_cli_refuses_to_apply_a_hypothesis_model_before_the_analysis(monkeypatch):
+    """PAP 9.45/9.46: the monthly run applies non-hypothesis keys on its own,
+    so the guard sits in the CLI, not in whoever writes the key list."""
+    from typer.testing import CliRunner
+
+    from lab import cli
+
+    called = []
+    monkeypatch.setattr("lab.jobs.run_learn_job", lambda *a, **k: called.append(k) or {})
+    runner = CliRunner()
+    refused = runner.invoke(cli.app, ["learn", "--apply", "--only", "m4_weights,m1_curves"])
+    assert refused.exit_code != 0 and "m1_curves" in refused.output and not called
+    allowed = runner.invoke(cli.app, ["learn", "--apply", "--only", "m2_baserates,m4_weights,m3_params"])
+    assert allowed.exit_code == 0 and called[0]["apply"] == frozenset(
+        {"m2_baserates", "m4_weights", "m3_params"})
