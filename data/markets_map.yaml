@@ -4179,63 +4179,49 @@ confirmed:
     relation_type: identity
     pmxt_confidence: 0.95
   confirmed_ts: '2026-10-11T14:56:49+00:00'
-proposed:
 - condition_id: '0xbbd3a0e2bf9512aca0676b07657e6056a1a7d90efc0d03cff8ad4e84562b4d4d'
   question: "Will the peak RONI for the 2026\u201327 El Ni\xF1o be 2.5 or above?"
   venue: kalshi
   external_id: KXRONI-27APR2-T25
   external_question: "Will the peak RONI value during the NDJ 2026-27 season be at\
     \ least 2.5\xB0C?"
-  rationale: "Both ask whether the peak RONI during the 2026-27 El Ni\xF1o season\
-    \ reaches/exceeds 2.5\xB0C; same event and threshold."
-  confidence: 0.95
-  proposed_ts: '2026-10-12T09:02:46+00:00'
-- condition_id: '0xbbd3a0e2bf9512aca0676b07657e6056a1a7d90efc0d03cff8ad4e84562b4d4d'
-  question: "Will the peak RONI for the 2026\u201327 El Ni\xF1o be 2.5 or above?"
-  venue: kalshi
-  external_id: KXRONI-27AUG-T30
-  external_question: "Will the peak RONI value during the 2026-27 El Ni\xF1o season\
-    \ be at least 3.0\xB0C?"
-  rationale: "Both concern peak RONI for the 2026-27 El Ni\xF1o season but different\
-    \ thresholds (3.0 vs 2.5); related but not the same event resolution."
-  confidence: 0.55
-  proposed_ts: '2026-10-12T09:02:46+00:00'
+  confirmed_ts: '2026-10-14T14:34:41+00:00'
 - condition_id: '0x863facc8c2f681bce7b04e6d7153c2aa46e0f9482cbba23c2456dc1dd4c72b1c'
   question: Will the Republican Party win the NY-14 House seat?
   venue: kalshi
   external_id: KXHOUSERACE-NY14-26-R
   external_question: Will Republican win the House race for NY-14?
-  rationale: 'Both markets resolve on the same real-world event: which party wins/controls
-    the NY-14 House seat in the 2026 midterm elections. Polymarket resolves to ''Yes''
-    if the Republican Party wins the NY-14 seat; Kalshi''s specific outcome (''Diamant
-    Hysenaj'' = the Republican nominee) resolves to Yes if the House member sworn
-    in for NY-14 for the term beginning in 2027 is a Republican. The party-control
-    outcome is equivalent. Minor caveats: Kalshi keys off the member sworn in for
-    the 2027 term rather than the election-day winner, and Polymarket has fallback
-    provisions for party affiliation/caucus intent; these edge cases are unlikely
-    to diverge and don''t override the substantive identity. Confidence moderately
-    high but below the tool''s 0.95 due to the slight timing/mechanism differences
-    and the unusual candidate-name outcome label.'
-  confidence: 0.85
-  proposed_ts: '2026-10-13T15:28:49+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+  confirmed_ts: '2026-10-14T14:35:13+00:00'
 - condition_id: '0xf9a646015bbf0c35b5de4bd4d69a5c78edf65c1c94b05104717237de154fc173'
   question: Hailee Steinfeld as Kate Bishop?
   venue: kalshi
   external_id: KXROLEINPRODUCTIONDOOMSDAY-HAI
   external_question: 'Will Hailee Steinfeld perform as Kate Bishop in Avengers: Doomsday?'
-  rationale: 'Both markets resolve on the same specific outcome: whether Hailee Steinfeld
-    appears/plays Kate Bishop in Avengers: Doomsday. The Polymarket question asks
-    ''Hailee Steinfeld as Kate Bishop?'' and its criteria resolve Yes if the listed
-    actor playing the listed character appears in the film, based on official announcements
-    or credible reporting. The Kalshi market''s specific outcome (per ticker/labels)
-    is ''Hailee Steinfeld as Kate Bishop?'' resolving Yes if she performs/is announced
-    as Kate Bishop. Same event, same character, same film, same resolution trigger.'
-  confidence: 0.95
-  proposed_ts: '2026-10-13T21:00:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
+  confirmed_ts: '2026-10-14T14:35:18+00:00'
+proposed:
+- condition_id: '0xf2d25c00b63871a5202141fe6f4b1c9bfd82d2bd254dc7e59ea55bd542aa7b62'
+  question: Will the Republican Party win the HI-02 House seat?
+  venue: kalshi
+  external_id: KXHOUSERACE-HI02-26-R
+  external_question: Will Republican win the House race for HI-02?
+  rationale: "Both markets resolve on whether the Republican Party wins the HI-02\
+    \ House seat in the 2026 midterms. The Kalshi market's only listed outcome is\
+    \ Brenton Awa, who is the Republican candidate for HI-02, and it resolves Yes\
+    \ if the HI-02 House member sworn in for the 2027 term is a Republican \u2014\
+    \ equivalent to the Polymarket question about the Republican Party winning the\
+    \ seat. Minor residual risk from the differences between 'wins the election' (Polymarket)\
+    \ and 'member sworn in' (Kalshi) in edge cases (death, party switch, vacancy),\
+    \ but these are negligible in the normal case."
+  confidence: 0.82
+  proposed_ts: '2026-10-14T15:28:44+00:00'
   source: pmxt
   source_meta:
     relation_type: identity
