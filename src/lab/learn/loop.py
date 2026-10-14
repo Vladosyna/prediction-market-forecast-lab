@@ -827,6 +827,6 @@ def run_learn(conn, config: dict[str, Any], llm=None, *, apply: bool | frozenset
         summary["postmortems"] = run_postmortems(conn, config, llm)
     else:
         summary["postmortems"] = "skipped (dry-run or --only)"
-    log.info("learn complete", extra={"ctx": {"apply": apply,
+    log.info("learn complete", extra={"ctx": {"apply": summary["apply"],
                                               "rollbacks": summary["rollbacks"]}})
     return summary
