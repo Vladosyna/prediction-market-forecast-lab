@@ -150,7 +150,9 @@ def run_learn_job(config: dict[str, Any], apply: bool | frozenset[str] = False) 
         summary = run_learn(conn, config, llm, apply=apply)
     finally:
         conn.close()
-    log.info("learn job complete", extra={"ctx": {"apply": apply, "summary": str(summary)[:200]}})
+    log.info("learn job complete", extra={"ctx": {
+        "apply": sorted(apply) if isinstance(apply, frozenset) else apply,
+        "summary": str(summary)[:200]}})
     return summary
 
 

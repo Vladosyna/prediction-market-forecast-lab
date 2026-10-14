@@ -260,3 +260,20 @@ def test_refit_statistical_models_runs_end_to_end_with_a_dataframe_training_set(
     assert results["m1_hier_curves"]["n_train"] == len(rows)
     # per_market came from the frame, not from a row loop over dicts
     assert results["m2_baserates"]
+
+
+def test_a_gap_in_version_files_never_overwrites_an_artifact(tmp_path):
+    """With m2_baserates_v5.json absent the file count handed out v6 three
+    times (2026-07-07, 08-02, 10-14), each save replacing an artifact the
+    registry still pointed at. Numbering is now highest + 1, and a save never
+    replaces an existing file."""
+    config = {"storage": {"models_dir": str(tmp_path / "models")}}
+    for _ in range(3):
+        save_artifact(config, "m2_baserates", {"kind": "m2_baserates"}, promote=False)
+    (tmp_path / "models" / "m2_baserates_v2.json").unlink()      # a gap, as on the VPS
+    v3 = (tmp_path / "models" / "m2_baserates_v3.json").read_text(encoding="utf-8")
+
+    path = save_artifact(config, "m2_baserates", {"kind": "m2_baserates"}, promote=False)
+
+    assert path.name == "m2_baserates_v4.json"
+    assert (tmp_path / "models" / "m2_baserates_v3.json").read_text(encoding="utf-8") == v3

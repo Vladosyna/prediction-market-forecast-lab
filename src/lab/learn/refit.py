@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -504,11 +505,18 @@ def save_artifact(config: dict[str, Any], name: str, artifact: dict[str, Any],
                   promote: bool = True) -> Path:
     """Write the next version of `name`; optionally promote it in ACTIVE.json."""
     d = models_dir(config)
-    existing = sorted(d.glob(f"{name}_v*.json"))
-    version = len(existing) + 1
+    # The highest existing number + 1, never the count + 1, and never over an
+    # existing file (2026-10-14). With m2_baserates_v5.json absent, the count
+    # handed out v6 three times -- on 07-07, 08-02 and 10-14 -- and each save
+    # silently replaced an artifact the registry still pointed at, breaking
+    # the "content immutable once written" rule rollback depends on.
+    pattern = re.compile(rf"{re.escape(name)}_v(\d+)\.json")
+    numbers = [int(m.group(1)) for f in d.glob(f"{name}_v*.json") if (m := pattern.fullmatch(f.name))]
+    version = max(numbers, default=0) + 1
     artifact = {**artifact, "version": version}
     path = d / f"{name}_v{version}.json"
-    path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    with path.open("x", encoding="utf-8") as fh:
+        fh.write(json.dumps(artifact, indent=2))
     if promote:
         active_path = d / "ACTIVE.json"
         active = json.loads(active_path.read_text(encoding="utf-8")) if active_path.exists() else {}
