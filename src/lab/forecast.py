@@ -421,9 +421,9 @@ def run_forecasts(conn, store: SnapshotStore, models: list[Forecaster],
                 continue
             try:
                 result = model.forecast(state, {"ts": ts})
-            except BudgetExceeded:
-                log.warning("forecast: cost cap hit, disabling model for this run",
-                            extra={"ctx": {"model": model.model_id}})
+            except BudgetExceeded as exc:
+                log.warning("forecast: LLM cost cap hit or provider down, disabling model for this run",
+                            extra={"ctx": {"model": model.model_id, "reason": str(exc)}})
                 exhausted.add(model.model_id)
                 continue
             except Exception:

@@ -71,6 +71,20 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+# Consecutive failed calls after which a client stops calling for the rest of
+# its run (2026-10-15). The provider was down from 02:00 to ~04:05 that night;
+# every M3 market cost ~15 minutes of timeouts, one after another, and the
+# whole forecast pass ran five hours. A day-long outage would have run ~30.
+LLM_FAILURE_LIMIT = 3
+
+
+class LlmUnavailable(BudgetExceeded):
+    """Raised instead of calling once the provider has failed LLM_FAILURE_LIMIT
+    times in a row. A BudgetExceeded on purpose: every caller already treats
+    that as "no more LLM calls this run" -- the forecast pass disables the
+    model, the verify job keeps its unasked candidates, post-mortems stop."""
+
+
 def _llm_section(config: dict[str, Any]) -> dict[str, Any]:
     return config.get("llm", {})
 
@@ -114,6 +128,7 @@ class LlmClient:
             raise ValueError(f"LLM provider {provider!r} requires {key_env}")
 
         self._conn = conn
+        self._consecutive_failures = 0
         self._provider = provider
         self._model = llm.get("model") or defaults.get("model", "")
         self._cap = float(llm.get("daily_cost_cap_usd", 5.0))
@@ -151,13 +166,28 @@ class LlmClient:
 
     def complete(self, system: str, prompt: str, purpose: str,
                  max_tokens: int = 2000) -> tuple[str, dict[str, Any]]:
+        if self._consecutive_failures >= LLM_FAILURE_LIMIT:
+            raise LlmUnavailable(f"LLM provider failed {self._consecutive_failures} calls "
+                                 "in a row; no more calls this run")
         spent = self.spend_today()
         if spent >= self._cap:
             raise BudgetExceeded(f"daily LLM cap reached: ${spent:.2f} >= ${self._cap:.2f}")
 
-        if self._provider == "anthropic":
-            return self._complete_anthropic(system, prompt, purpose, max_tokens)
-        return self._complete_openai_compatible(system, prompt, purpose, max_tokens)
+        try:
+            if self._provider == "anthropic":
+                result = self._complete_anthropic(system, prompt, purpose, max_tokens)
+            else:
+                result = self._complete_openai_compatible(system, prompt, purpose, max_tokens)
+        except Exception as exc:
+            self._consecutive_failures += 1
+            if self._consecutive_failures == LLM_FAILURE_LIMIT:
+                log.warning("llm: provider failed %d calls in a row -- no more calls this run",
+                            LLM_FAILURE_LIMIT,
+                            extra={"ctx": {"provider": self._provider, "purpose": purpose,
+                                           "last_error": f"{type(exc).__name__}: {exc}"[:200]}})
+            raise
+        self._consecutive_failures = 0
+        return result
 
     def _complete_anthropic(self, system: str, prompt: str, purpose: str,
                             max_tokens: int) -> tuple[str, dict[str, Any]]:
