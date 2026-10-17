@@ -103,3 +103,4 @@
 {"committed_ts":"2026-10-14T05:58:05+00:00","date":"2026-10-13","first_id":2080521,"last_id":2142225,"ledger_id":"d4dd00f1","prospective":true,"row_count":61705,"sha256":"ead6e4be8f1b1527e4251008746c98ff6f86a35d898a89b3c07772443363ea73"}
 {"committed_ts":"2026-10-15T08:44:59+00:00","date":"2026-10-14","first_id":2142226,"last_id":2205633,"ledger_id":"d4dd00f1","prospective":true,"row_count":63408,"sha256":"46a15b7478370c62bac26836ec92d7223315ba33e4a4f7c73d9aa439c71c0794"}
 {"committed_ts":"2026-10-16T04:59:53+00:00","date":"2026-10-15","first_id":2205634,"last_id":2271742,"ledger_id":"d4dd00f1","prospective":true,"row_count":66109,"sha256":"b990974aa6d71807be45420fda47497a7ee5a774398049d799a090b9529917ae"}
+{"committed_ts":"2026-10-17T18:17:32+00:00","date":"2026-10-16","first_id":2271743,"last_id":2358140,"ledger_id":"d4dd00f1","prospective":true,"row_count":86398,"sha256":"8d5eb91dbaac6cbc5549cb06a1ced06a0be92aa124c424cb150c7095cceb4804"}
