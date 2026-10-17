@@ -56,6 +56,9 @@ SNAPSHOT_SCHEMA = {
 # genuinely needs a book blob can pass `columns` explicitly.
 LATEST_PER_MARKET_COLUMNS = [c for c in SNAPSHOT_SCHEMA if c not in ("bids_json", "asks_json")]
 
+# The single whole-day file every partition used before 2026-10-17 (see append).
+LEGACY_PARTITION_FILE = "snapshots.parquet"
+
 
 def floor_ts_bucket(ts: datetime, bucket_minutes: int) -> str:
     """Floor a UTC datetime to the cadence bucket, ISO-8601."""
@@ -73,11 +76,66 @@ class SnapshotStore:
         self.base = base if base.is_absolute() else PROJECT_ROOT / base
         self.base.mkdir(parents=True, exist_ok=True)
 
-    def _partition(self, date_str: str) -> Path:
-        return self.base / f"date={date_str}" / "snapshots.parquet"
+    def _day_dir(self, date_str: str) -> Path:
+        return self.base / f"date={date_str}"
+
+    def _partition(self, date_str: str, hour: str) -> Path:
+        return self._day_dir(date_str) / f"snapshots-{hour}.parquet"
+
+    def partition_files(self, date_str: str) -> list[Path]:
+        """Every parquet file of one date partition, in chronological order.
+
+        From 2026-10-17 a day is written as one file per UTC hour of the
+        bucketed `ts` (`snapshots-HH.parquet`); every day before that, and the
+        morning of the switch-over, is a single `snapshots.parquet`. The
+        whole-day file sorts first because on the switch-over day it holds the
+        earliest rows. `*.tmp` files (an append in flight) never match.
+        """
+        day = self._day_dir(date_str)
+        if not day.is_dir():
+            return []
+        return sorted(day.glob("*.parquet"),
+                      key=lambda p: (p.name != LEGACY_PARTITION_FILE, p.name))
+
+    def _existing_keys(self, files: list[Path], part: pl.DataFrame) -> pl.DataFrame:
+        """The (ts, condition_id) keys of `part` already present in `files`.
+
+        A semi-join inside a streaming scan of the two key columns: only the
+        matching keys are ever materialised, never the day's keys (let alone
+        its order-book blobs)."""
+        wanted = part.select("ts", "condition_id").lazy()
+        hits = []
+        for p in files:
+            try:
+                hits.append(pl.scan_parquet(p).select("ts", "condition_id")
+                            .join(wanted, on=["ts", "condition_id"], how="semi")
+                            .collect(engine="streaming"))
+            except Exception:
+                # Same policy as read_range: one unreadable file is skipped
+                # loudly, not allowed to stop collection for the rest of the day.
+                log.error("snapshot partition unreadable, skipping",
+                          extra={"ctx": {"path": str(p)}})
+        if not hits:
+            return part.select("ts", "condition_id").clear()
+        return pl.concat(hits)
 
     def append(self, rows: list[dict]) -> int:
-        """Append rows, deduplicating on (ts, condition_id). Returns rows written."""
+        """Append rows, deduplicating on (ts, condition_id). Returns rows written.
+
+        One file per (date, hour of `ts`), 2026-10-17. Until then each append
+        read the WHOLE day's partition -- order-book blobs included -- and
+        rewrote it, so every snapshot round (the matched-pair job alone fires
+        every two minutes) cost a transient allocation that grew with the day:
+        measured on the orchestrator at +370MB with the day's file at 31MB,
+        and ~+600MB by its end at ~51MB, inside the same cgroup as the nightly
+        forecast and eval children, which the 10-16 and 10-17 OOM kills hit.
+        An append now rewrites only its own hour's file (~1/24 of the day) and
+        checks duplicates against the rest of the day by key alone. Readers
+        are unaffected: §5's layout was always `date=YYYY-MM-DD/*.parquet`,
+        every reader in this package goes through `partition_files`, and none
+        depends on physical row order -- `(ts, condition_id)` is unique and
+        every consumer sorts by `ts`.
+        """
         if not rows:
             return 0
         rows = [
@@ -86,20 +144,22 @@ class SnapshotStore:
         ]
         df = pl.DataFrame(rows, schema=SNAPSHOT_SCHEMA)
         written = 0
-        # A batch can straddle midnight; group rows into their date partitions.
-        df = df.with_columns(pl.col("ts").str.slice(0, 10).alias("_date"))
-        for (date_str,), part in df.partition_by("_date", as_dict=True).items():
-            part = part.drop("_date")
-            path = self._partition(date_str)
+        # A batch can straddle midnight (and an hour); group rows into their files.
+        df = df.with_columns(pl.col("ts").str.slice(0, 10).alias("_date"),
+                             pl.col("ts").str.slice(11, 2).alias("_hour"))
+        for (date_str, hour), part in df.partition_by(["_date", "_hour"], as_dict=True).items():
+            part = part.drop("_date", "_hour")
+            path = self._partition(date_str, hour)
             path.parent.mkdir(parents=True, exist_ok=True)
-            if path.exists():
-                existing = pl.read_parquet(path)
-                keys = existing.select("ts", "condition_id")
+            existing_files = self.partition_files(date_str)
+            if existing_files:
+                keys = self._existing_keys(existing_files, part)
                 part = part.join(keys, on=["ts", "condition_id"], how="anti")
                 if part.is_empty():
                     continue
-                # diagonal: partitions written before a column was added get nulls.
-                merged = pl.concat([existing, part], how="diagonal")
+            if path.exists():
+                # diagonal: a file written before a column was added gets nulls.
+                merged = pl.concat([pl.read_parquet(path), part], how="diagonal")
             else:
                 merged = part
             # Write atomically: a full write to a temp file, then an atomic
@@ -139,7 +199,7 @@ class SnapshotStore:
         the orchestrator on 2026-08-06. Filtering at read time is the difference
         between that and a few tens of thousands of rows.
         """
-        present = [self._partition(d) for d in dates if self._partition(d).exists()]
+        present = [p for d in dates for p in self.partition_files(d)]
         wanted = list(dict.fromkeys(condition_ids)) if condition_ids is not None else None
         frames = []
         for p in present:

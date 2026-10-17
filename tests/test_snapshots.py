@@ -109,8 +109,94 @@ def test_append_is_atomic_no_tmp_left_behind(tmp_path):
     store.append([_row("2026-07-02T13:50:00+00:00", "b")])  # read-modify-write path
     part_dir = tmp_path / "date=2026-07-02"
     files = sorted(p.name for p in part_dir.iterdir())
-    assert files == ["snapshots.parquet"]  # no leftover .tmp
+    assert files == ["snapshots-13.parquet"]  # one hour's file, no leftover .tmp
     assert len(store.read_range(["2026-07-02"])) == 2  # both rows intact
+
+
+# --- one file per hour (2026-10-17): an append rewrites only its own hour -----
+
+def test_append_writes_one_file_per_hour_and_dedups_across_them(tmp_path):
+    store = SnapshotStore(tmp_path)
+    assert store.append([_row("2026-07-02T13:45:00+00:00", "a"),
+                         _row("2026-07-02T14:00:00+00:00", "a")]) == 2
+    day = tmp_path / "date=2026-07-02"
+    assert sorted(p.name for p in day.iterdir()) == ["snapshots-13.parquet",
+                                                     "snapshots-14.parquet"]
+    # A replay of either hour's key is a duplicate, whichever file holds it.
+    assert store.append([_row("2026-07-02T13:45:00+00:00", "a", mid=0.9),
+                         _row("2026-07-02T14:00:00+00:00", "a", mid=0.9)]) == 0
+    assert store.read_range(["2026-07-02"])["mid"].to_list() == [0.5, 0.5]
+
+
+def test_switch_over_day_reads_and_dedups_against_the_whole_day_file(tmp_path):
+    """The morning of the switch-over lives in the legacy single file; the
+    afternoon goes to hour files. Both are one partition to every reader, and
+    a key already in the legacy file is still a duplicate."""
+    import polars as pl
+
+    store = SnapshotStore(tmp_path)
+    legacy = tmp_path / "date=2026-10-17" / "snapshots.parquet"
+    legacy.parent.mkdir(parents=True)
+    pl.DataFrame([{c: _row("2026-10-17T15:00:00+00:00", "a").get(c, "polymarket"
+                                                                 if c == "venue" else None)
+                   for c in SNAPSHOT_SCHEMA}], schema=SNAPSHOT_SCHEMA).write_parquet(legacy)
+
+    assert store.append([_row("2026-10-17T15:00:00+00:00", "a", mid=0.9)]) == 0
+    assert store.append([_row("2026-10-17T15:05:00+00:00", "a", mid=0.7)]) == 1
+    assert [p.name for p in store.partition_files("2026-10-17")] == [
+        "snapshots.parquet", "snapshots-15.parquet"]
+    df = store.read_range(["2026-10-17"])
+    assert df["mid"].to_list() == [0.5, 0.7]
+    assert store.latest_per_market(["2026-10-17"])["mid"].item() == 0.7
+
+
+def test_append_keeps_first_write_semantics_on_a_random_sequence(tmp_path):
+    """The layout change must not change WHAT is stored: against a reference
+    that keeps the first row written per (ts, condition_id), a random sequence
+    of overlapping batches yields exactly the same rows."""
+    import random
+
+    rng = random.Random(7)
+    store = SnapshotStore(tmp_path)
+    reference: dict[tuple[str, str], float] = {}
+    for _ in range(40):
+        # Unique keys within a batch: a round never snapshots a market twice
+        # in one bucket, and append has never deduplicated inside a batch.
+        batch_by_key: dict[tuple[str, str], dict] = {}
+        for _ in range(rng.randint(1, 6)):
+            ts = f"2026-07-0{rng.choice([2, 3])}T{rng.choice([0, 1, 13, 23]):02d}:" \
+                 f"{rng.choice([0, 5, 55]):02d}:00+00:00"
+            row = _row(ts, rng.choice("abc"), mid=round(rng.random(), 3))
+            batch_by_key.setdefault((ts, row["condition_id"]), row)
+        batch = list(batch_by_key.values())
+        expected_new = sum(1 for key in batch_by_key if key not in reference)
+        written = store.append(batch)
+        for r in batch:
+            reference.setdefault((r["ts"], r["condition_id"]), r["mid"])
+        assert written == expected_new
+    df = store.read_range(["2026-07-02", "2026-07-03"])
+    got = {(t, c): m for t, c, m in df.select("ts", "condition_id", "mid").iter_rows()}
+    assert got == reference
+    assert df.height == len(reference)
+
+
+def test_append_reads_in_full_only_its_own_hours_file(tmp_path, monkeypatch):
+    """The point of the change: no append materialises the rest of the day."""
+    import polars as pl
+
+    store = SnapshotStore(tmp_path)
+    for h in range(5):
+        store.append([_row(f"2026-07-02T{h:02d}:00:00+00:00", "a")])
+    read: list[str] = []
+    real = pl.read_parquet
+
+    def spy(path, *a, **k):
+        read.append(str(path))
+        return real(path, *a, **k)
+
+    monkeypatch.setattr(pl, "read_parquet", spy)
+    assert store.append([_row("2026-07-02T03:05:00+00:00", "b")]) == 1
+    assert read == [str(tmp_path / "date=2026-07-02" / "snapshots-03.parquet")]
 
 
 def test_read_range_column_projection(tmp_path):
