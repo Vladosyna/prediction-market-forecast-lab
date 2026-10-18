@@ -229,13 +229,27 @@ async def backfill_event_links(conn, gamma, batch: int = 50) -> dict[str, int]:
     return out
 
 
-def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict[str, float]:
+# Everything either lookup below reads. Narrow on purpose (2026-10-18): both
+# run inside the collector process on every hourly Polymarket and Kalshi sync,
+# over four days of snapshots, and the default projection carries ~10 columns
+# neither of them looks at.
+LOOKUP_COLUMNS = ["ts", "condition_id", "bid_depth_usd", "ask_depth_usd", "mid"]
+
+
+def latest_quotes(store: SnapshotStore, now: datetime, days_back: int = 3) -> pl.DataFrame:
+    """The most recent snapshot row per market over `days_back` days, in the
+    columns `_depth_lookup` and `_mid_lookup` need -- read once, shared."""
+    dates = [utc_date_str(now - timedelta(days=d)) for d in range(days_back + 1)]
+    return store.latest_per_market(dates, columns=LOOKUP_COLUMNS)
+
+
+def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3,
+                  latest: pl.DataFrame | None = None) -> dict[str, float]:
     """condition_id -> most recent (bid_depth_usd + ask_depth_usd), Phase 17
     item 2. A market with no snapshot in the window is simply absent from the
     returned dict -- callers treat that as "no depth data yet" (falls back to
     liquidity/volume tiering), not as zero depth."""
-    dates = [utc_date_str(now - timedelta(days=d)) for d in range(days_back + 1)]
-    df = store.latest_per_market(dates)
+    df = latest if latest is not None else latest_quotes(store, now, days_back)
     if df.is_empty():
         return {}
     # A row can exist with BOTH depth columns null -- a venue whose quote had no
@@ -253,12 +267,12 @@ def _depth_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> di
     return dict(zip(df["condition_id"].to_list(), depth.to_list()))
 
 
-def _mid_lookup(store: SnapshotStore, now: datetime, days_back: int = 3) -> dict[str, float]:
+def _mid_lookup(store: SnapshotStore, now: datetime, days_back: int = 3,
+                latest: pl.DataFrame | None = None) -> dict[str, float]:
     """condition_id -> most recent mid price, for the tail_price universe_log
     check (Phase 15) -- mirrors _depth_lookup's exact "absent means no data
     yet, not zero" contract."""
-    dates = [utc_date_str(now - timedelta(days=d)) for d in range(days_back + 1)]
-    df = store.latest_per_market(dates)
+    df = latest if latest is not None else latest_quotes(store, now, days_back)
     if df.is_empty():
         return {}
     return dict(zip(df["condition_id"].to_list(), df["mid"].to_list()))
@@ -292,8 +306,10 @@ async def sync_universe(gamma: GammaClient, conn, store: SnapshotStore,
     """
     now = now_utc()
     taxonomy = load_categories()
-    depth_by_market = _depth_lookup(store, now)
-    mid_by_market = _mid_lookup(store, now)
+    latest = latest_quotes(store, now)
+    depth_by_market = _depth_lookup(store, now, latest=latest)
+    mid_by_market = _mid_lookup(store, now, latest=latest)
+    del latest
     price_lo, price_hi = config["universe"]["forecast_price_bounds"]
     events = await gamma.iter_events(active="true", closed="false")
     counts = {"events": len(events), "seen": 0, "binary": 0,

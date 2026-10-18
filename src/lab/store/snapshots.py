@@ -199,60 +199,75 @@ class SnapshotStore:
         the orchestrator on 2026-08-06. Filtering at read time is the difference
         between that and a few tens of thousands of rows.
         """
-        present = [p for d in dates for p in self.partition_files(d)]
         wanted = list(dict.fromkeys(condition_ids)) if condition_ids is not None else None
-        frames = []
-        for p in present:
-            try:
-                if columns is None and wanted is None:
-                    frames.append(pl.read_parquet(p))
-                else:
-                    lf = pl.scan_parquet(p)
-                    available = set(lf.collect_schema().names())
-                    if columns is not None:
-                        lf = lf.select([c for c in columns if c in available])
-                    if wanted is not None:
-                        lf = lf.filter(pl.col("condition_id").is_in(wanted))
-                    frames.append(lf.collect())
-            except Exception:
-                # A truncated or 0-byte partition -- e.g. a write interrupted
-                # before the atomic rename in append() landed, as happens on an
-                # abrupt shutdown -- must not abort the whole read and, via the
-                # report/eval path, take down (and crash-loop) the orchestrator.
-                # Skip that one day's file loudly rather than everything at once
-                # (guardrail 9: fail soft, log loud). append() now writes
-                # atomically so new files can't land in this state.
-                log.error("snapshot partition unreadable, skipping",
-                          extra={"ctx": {"path": str(p)}})
+        frames = [df for d in dates for p in self.partition_files(d)
+                  if (df := self._read_file(p, columns, wanted)) is not None]
         if not frames:
-            schema = SNAPSHOT_SCHEMA if columns is None else {c: SNAPSHOT_SCHEMA[c] for c in columns}
-            return pl.DataFrame(schema=schema)
+            return self._empty(columns)
         return pl.concat(frames, how="diagonal")
+
+    @staticmethod
+    def _empty(columns: list[str] | None) -> pl.DataFrame:
+        schema = SNAPSHOT_SCHEMA if columns is None else {c: SNAPSHOT_SCHEMA[c] for c in columns}
+        return pl.DataFrame(schema=schema)
+
+    @staticmethod
+    def _read_file(p: Path, columns: list[str] | None,
+                   wanted: list[str] | None) -> pl.DataFrame | None:
+        """One parquet file, projected and filtered at read time; None if unreadable."""
+        try:
+            if columns is None and wanted is None:
+                return pl.read_parquet(p)
+            lf = pl.scan_parquet(p)
+            available = set(lf.collect_schema().names())
+            if columns is not None:
+                lf = lf.select([c for c in columns if c in available])
+            if wanted is not None:
+                lf = lf.filter(pl.col("condition_id").is_in(wanted))
+            return lf.collect()
+        except Exception:
+            # A truncated or 0-byte partition -- e.g. a write interrupted
+            # before the atomic rename in append() landed, as happens on an
+            # abrupt shutdown -- must not abort the whole read and, via the
+            # report/eval path, take down (and crash-loop) the orchestrator.
+            # Skip that one file loudly rather than everything at once
+            # (guardrail 9: fail soft, log loud). append() now writes
+            # atomically so new files can't land in this state.
+            log.error("snapshot partition unreadable, skipping",
+                      extra={"ctx": {"path": str(p)}})
+            return None
 
     def latest_per_market(self, dates: list[str], columns: list[str] | None = None,
                           condition_ids: Iterable[str] | None = None) -> pl.DataFrame:
         """Most recent snapshot row per condition_id across `dates`.
 
-        Reduced one day at a time rather than over a single concatenated frame:
+        Reduced one file at a time rather than over a single concatenated frame:
         the result is the same row either way (`ts` is ISO-8601, so lexical and
-        chronological order agree, and the last-of-the-per-day-lasts is the
-        overall last), but the peak is one day's partition instead of the whole
-        window. Defaults to `LATEST_PER_MARKET_COLUMNS` -- see there for why the
+        chronological order agree, and the last of the per-file lasts is the
+        overall last), but the peak is one file instead of the whole window.
+        Defaults to `LATEST_PER_MARKET_COLUMNS` -- see there for why the
         order-book blobs are excluded. `condition_ids` filters inside the scan,
         for callers that need a handful of markets rather than all of them.
         """
         cols = columns if columns is not None else LATEST_PER_MARKET_COLUMNS
-        wanted = list(condition_ids) if condition_ids is not None else None
-        reduced = []
+        wanted = list(dict.fromkeys(condition_ids)) if condition_ids is not None else None
+        # One FILE at a time (2026-10-18), folded into a running result that
+        # never holds more than one row per market. Per day was the bound
+        # until then, and a day is ~1M rows: the hourly Polymarket and Kalshi
+        # universe syncs each read four of them through here, which put the
+        # orchestrator at +0.4..0.8GB every hour at :18 (1.2GB at startup).
+        # Same answer -- (ts, condition_id) is unique, so the latest row of
+        # the latest-per-file rows is the latest row overall.
+        acc: pl.DataFrame | None = None
         for date in dates:
-            day = self.read_range([date], columns=cols, condition_ids=wanted)
-            if not day.is_empty():
-                reduced.append(day.sort("ts").group_by("condition_id").last())
-        if not reduced:
-            return self.read_range([], columns=cols)   # correctly-typed empty frame
-        if len(reduced) == 1:
-            return reduced[0]
-        return pl.concat(reduced, how="diagonal").sort("ts").group_by("condition_id").last()
+            for p in self.partition_files(date):
+                df = self._read_file(p, cols, wanted)
+                if df is None or df.is_empty():
+                    continue
+                if acc is not None:
+                    df = pl.concat([acc, df], how="diagonal")
+                acc = df.sort("ts").group_by("condition_id").last()
+        return acc if acc is not None else self._empty(cols)
 
 
 def utc_date_str(ts: datetime) -> str:
