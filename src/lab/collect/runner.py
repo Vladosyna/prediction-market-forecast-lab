@@ -205,6 +205,8 @@ def _add_interval_job(scheduler, fn, minutes: float, **kw) -> None:
 
 # Minutes past each hour at which the Polymarket tail round starts.
 TAIL_ROUND_PHASE_MINUTES = 5
+# Seconds past each 5-minute boundary at which the Kalshi liquid round starts.
+KALSHI_LIQUID_PHASE_SECONDS = 5
 
 
 def _phase_anchor(minutes_past_midnight: float) -> datetime:
@@ -336,7 +338,19 @@ def register_collect_jobs(scheduler: AsyncIOScheduler, config: dict[str, Any]) -
 
     _add_interval_job(scheduler, job_kalshi_sync, venues_cfg["kalshi"]["sync_interval_minutes"])
     kalshi_cadence = venues_cfg["kalshi"]["snapshot_interval_minutes"]
-    _add_interval_job(scheduler, job_kalshi_snap_liquid, kalshi_cadence["liquid"])
+    # Pinned to 5 s past each 5-minute boundary (2026-10-18), for the reason
+    # the Polymarket tail is pinned above. Rows carry the 5-minute bucket the
+    # round STARTED in and the liquid bound is 15 minutes, while a round takes
+    # 200-330 s against its 300 s interval, so one firing in four is skipped.
+    # A restart at 18:18:35 on 10-17 put the rounds at :x3:35/:x8:35; the
+    # 01:53:35 firing was skipped, the 01:58:35 round was still running at the
+    # 02:00 pass, the newest complete bucket was 01:45 -- 15.2 minutes old --
+    # and the venue's liquid tier got 68 forecasts against ~3,250 the night
+    # before. Starting just past the boundary makes the label as fresh as a
+    # round can have: at 02:00 the newest complete bucket is 01:50 (10 min)
+    # unless two rounds in a row overran.
+    _add_interval_job(scheduler, job_kalshi_snap_liquid, kalshi_cadence["liquid"],
+                      start_date=_phase_anchor(KALSHI_LIQUID_PHASE_SECONDS / 60))
     _add_interval_job(scheduler, job_kalshi_snap_tail, kalshi_cadence["tail"])
     _add_interval_job(scheduler, job_kalshi_resolutions,
                       venues_cfg["kalshi"]["resolution_poll_minutes"])

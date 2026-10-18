@@ -356,6 +356,38 @@ def test_polymarket_tail_round_keeps_its_phase_across_restarts(tmp_path):
     _asyncio.run(_check())
 
 
+def test_kalshi_liquid_round_starts_just_past_each_bucket_boundary(tmp_path):
+    """The liquid rows carry the 5-minute bucket their round started in. A
+    restart at 18:18:35 on 2026-10-17 put the rounds at :x3:35/:x8:35, and at
+    the 02:00 pass the newest complete bucket was 15.2 minutes old -- the
+    venue's liquid tier lost the night (68 forecasts against ~3,250)."""
+    import asyncio as _asyncio
+    from datetime import datetime, timezone
+
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    from lab.collect.runner import KALSHI_LIQUID_PHASE_SECONDS
+
+    config = load_config()
+    config = {**config, "storage": {**config["storage"], "db_path": str(tmp_path / "lab.db"),
+                                    "snapshots_dir": str(tmp_path / "snapshots")}}
+
+    async def _check() -> None:
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        ctx = register_collect_jobs(scheduler, config)
+        job = next(j for j in scheduler.get_jobs()
+                   if j.name.endswith(".job_kalshi_snap_liquid"))
+        for started in ("18:18:35", "01:58:59", "04:28:09", "00:00:01"):
+            h, m, s = map(int, started.split(":"))
+            now = datetime(2026, 10, 18, h, m, s, tzinfo=timezone.utc)
+            fire = job.trigger.get_next_fire_time(None, now)
+            assert fire.minute % 5 == 0 and fire.second == KALSHI_LIQUID_PHASE_SECONDS, (
+                f"a process started at {started} would run the round at {fire:%H:%M:%S}")
+        await ctx.aclose()
+
+    _asyncio.run(_check())
+
+
 def _seed_coverage(conn, model, venue, days, n):
     """`days` consecutive dates ending 2026-08-20, `n` forecasts each."""
     import datetime
