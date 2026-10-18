@@ -1887,3 +1887,45 @@ mistyped key list nor a hurried manual run can restart a hypothesis's confirmato
 application moves M4's forecasts, and with them the shadow portfolio that 9.41 reports beside H2
 (outside H2's decision rule). Every application has a `registered_ts` in `model_versions`, so each
 of those breaks is dated, and their series should be read with those dates marked.
+
+**Addendum 9.47 (2026-10-18).** Kalshi's liquid tier was skipped as stale at the 02:00 forecast pass
+on 2026-10-18 and was recovered the same morning. This records the loss, its cause, the fix and the
+recovery. No exclusion window is declared, for the reason 9.39 and 9.43 gave.
+
+**What happened.** A Kalshi liquid snapshot row is labelled with the 5-minute bucket its round
+started in, and guardrail 13 allows 15 minutes from that label. The round takes 200-330 seconds
+against its 300-second interval, so about one firing in four is skipped while the previous round is
+still running; this was the same before and after the 2026-10-17 changes (median 202-227 s on
+10-14..10-18). The round's phase was the second the collector process had last started at. A restart
+at 18:18:35 on 2026-10-17, made to deploy a memory fix, put the rounds at :x3:35 and :x8:35. Before
+the 02:00 pass the 01:53:35 firing was skipped and the 01:58:35 round was still running, so the
+newest complete bucket was 01:45: 15.2 minutes old against a 15-minute bound.
+
+The pass skipped **4,624** markets as stale (30-145 on the nights of 10-15..10-17). Kalshi's liquid
+tier received forecasts on **68** markets, against 3,247 on 10-17. Every other venue and tier was
+within its usual range.
+
+**The fix.** From 05:27 UTC on 2026-10-18 the Kalshi liquid round starts five seconds past each
+5-minute boundary, whatever second the process started at, as 9.43 did for the Polymarket tail.
+At 02:00 the newest complete bucket is then 01:50, ten minutes old, unless two rounds in a row
+overrun. A shorter round would widen that margin, but it changes what is collected (the order-book
+ladder rotation 9.39 set) and is not taken here.
+
+**The recovery.** A single pass at 05:38 UTC, after the nightly bundle had finished, skipped 21
+markets as stale. It forecast the **3,466** markets that had not yet been forecast on 10-18
+(13,921 rows; 3,186 of the markets in Kalshi's liquid tier), under the ordinary calendar-day rule
+(9.38), as the 10-11 recovery in 9.43 did. Kalshi's liquid tier finished the day with 3,267 markets
+forecast, against 3,265 on 10-17. Those forecasts carry timestamps of 05:38-07:22 rather than 02:00.
+
+**A layout change in the same deployment, disclosed for readers of the raw snapshots.** From 18:18
+UTC on 2026-10-17 each date partition is written as one file per UTC hour of the row's bucket
+(`date=YYYY-MM-DD/snapshots-HH.parquet`) instead of one `snapshots.parquet` per day; that day's
+earlier rows stay in its `snapshots.parquet`. Rows, columns and the (ts, condition_id) deduplication
+are unchanged, and §5's layout was always `date=YYYY-MM-DD/*.parquet`. A reader that opens
+`snapshots.parquet` by name sees no row written after that moment.
+
+**Standing under this plan.** Whether a market was skipped depended on its tier and on the clock, not
+on any outcome. The forecasts that were written are valid and stay in every statistic, and the
+recovered ones are ordinary forecasts made about four hours later than the rest of the night's. As
+in 9.39 and 9.43, no exclusion window is declared. Nothing in this addendum rests on any outcome or
+skill estimate.
