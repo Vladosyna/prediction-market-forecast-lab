@@ -4226,6 +4226,43 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: kalshi:KXHURCTOTMAJ-26DEC01-T2
+  question: Will there be more than 2 major Atlantic hurricanes in 2026?
+  venue: kalshi
+  external_id: KXHURCTOTMAJ-26DEC01-T2
+  external_question: Will there be more than 2 major Atlantic hurricanes in 2026?
+  rationale: Both ask whether more than 2 major Atlantic hurricanes occur in 2026;
+    identical event and threshold.
+  confidence: 0.98
+  proposed_ts: '2026-10-19T10:08:48+00:00'
+- condition_id: kalshi:KXEARTHQUAKEJAPAN-30
+  question: Will there be an at least 8.0 magnitude earthquake in Japan before 2030?
+  venue: kalshi
+  external_id: KXEARTHQUAKEJAPAN-30
+  external_question: Will there be an at least 8.0 magnitude earthquake in Japan before
+    2030?
+  rationale: 'Identical question: ''Will there be an at least 8.0 magnitude earthquake
+    in Japan before 2030?'' -- same event, magnitude threshold, location, and deadline.'
+  confidence: 0.99
+  proposed_ts: '2026-10-19T10:08:50+00:00'
+- condition_id: '0x8d16da2d9c02f19254048af42560846ceb0f0bf5da071a0a312df1c58e2b8dd9'
+  question: Will Justin Bieber release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-JUS
+  external_question: Will Justin Bieber release a new album in 2026?
+  rationale: 'Both markets ask whether Justin Bieber releases a new album in 2026,
+    resolving the same real-world event. Polymarket''s criteria are more detailed
+    (excluding live/re-release/deluxe/compilation and requiring majority-original
+    tracks), but these are standard clarifications that do not contradict Kalshi''s
+    simpler ''releases a new album in 2026'' outcome. No substantive divergence in
+    the underlying event or resolution window (calendar year 2026). Minor risk: Kalshi''s
+    terser text lacks explicit exclusions, but it does not define a conflicting standard.'
+  confidence: 0.9
+  proposed_ts: '2026-10-19T18:05:40+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
