@@ -4263,6 +4263,24 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xa9e24f23e61265a798a2e484c0ead96255e6cd94034dfc0ab58343aa907cc390'
+  question: Will Kostadin Kostadinov win the next  Bulgarian presidential election?
+  venue: kalshi
+  external_id: KXBULGARIAPRES-26NOV15-KKOS
+  external_question: Will Kostadin Kostadinov win the 2026 Bulgarian presidential
+    election?
+  rationale: 'Both markets resolve on the same specific outcome: whether Kostadin
+    Kostadinov wins the next/2026 Bulgarian presidential election. Polymarket''s election
+    is expected in Fall 2026, and Kalshi''s ticker specifies 2026. Both use the same
+    candidate and the same real-world event, with Polymarket defaulting to ''Other''
+    if unresolved (Kalshi''s outcome simply becomes No), which is a minor mechanical
+    difference, not a resolution-criteria mismatch.'
+  confidence: 0.95
+  proposed_ts: '2026-10-22T16:42:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
