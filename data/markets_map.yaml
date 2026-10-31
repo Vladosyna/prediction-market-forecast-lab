@@ -4281,6 +4281,50 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: kalshi:KXHURCAT-26HANNA-T1
+  question: Will Hanna become a Category 1 hurricane?
+  venue: kalshi
+  external_id: KXHURCAT-26HANNA-T1
+  external_question: Will Hanna become a Category 1 hurricane?
+  rationale: Both ask whether the same named storm, Hanna, becomes a Category 1 hurricane;
+    identical event and resolution criteria.
+  confidence: 0.98
+  proposed_ts: '2026-10-26T09:10:17+00:00'
+- condition_id: kalshi:KXRONI-27AUG-T30
+  question: "Will the peak RONI value during the 2026-27 El Ni\xF1o season be at least\
+    \ 3.0\xB0C?"
+  venue: kalshi
+  external_id: KXRONI-27AUG-T30
+  external_question: "Will the peak RONI value during the 2026-27 El Ni\xF1o season\
+    \ be at least 3.0\xB0C?"
+  rationale: "Identical question: peak RONI value during the 2026-27 El Ni\xF1o season\
+    \ being at least 3.0\xB0C. Same metric (RONI), same season, same threshold."
+  confidence: 0.95
+  proposed_ts: '2026-10-26T09:10:20+00:00'
+- condition_id: '0x97a13262d6801d392fbe2a1c31ea1c1210c15ebd7f078fc1473eb6f4e5b89759'
+  question: Will the Democratic Party win the popular vote in the 2026 U.S. House
+    of Representatives midterm elections by between 14% and 16%?
+  venue: kalshi
+  external_id: KXHOUSEPOPVOTEMARGIN-27NOV03-B15
+  external_question: Will the Democratic margin of victory in the 2026 U.S. House
+    of Representatives national popular vote be between 14 and 16%?
+  rationale: 'Both markets resolve on the same underlying quantity: the Democratic
+    vs. Republican national popular vote margin in the 2026 U.S. House elections,
+    bracketed between 14% and 16%. The slight discrepancy is boundary treatment: Polymarket''s
+    bracket [14%,16%] resolves ties to the higher bracket (also effectively [14%,16%],
+    including both 14 and 16), while Kalshi is inclusive of the lower bound and exclusive
+    of the upper bound ([14%,16)). This means a margin of exactly 16.00% would diverge
+    (Polymarket YES, Kalshi NO), but such an exact-boundary outcome is extremely unlikely
+    with real vote percentages. The event, metric (percentage-point margin of Democratic
+    minus Republican House popular vote share), timeframe, and resolution logic are
+    substantively identical, so identity is a reasonable classification despite the
+    minor upper-bound edge case.'
+  confidence: 0.85
+  proposed_ts: '2026-10-31T20:03:39+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
