@@ -4325,6 +4325,34 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: kalshi:KXLAYOFFSYINFO-26-494000
+  question: More tech layoffs in 2026 than in 2025?
+  venue: kalshi
+  external_id: KXLAYOFFSYINFO-26-494000
+  external_question: More tech layoffs in 2026 than in 2025?
+  rationale: "Identical question: 'More tech layoffs in 2026 than in 2025?' \u2014\
+    \ exact same real-world event and resolution criteria."
+  confidence: 0.95
+  proposed_ts: '2026-11-02T14:00:03+00:00'
+- condition_id: '0xc7f679982ec869e043a54456aa4c5003adf265ab96d8c96e09875c9284ed681c'
+  question: Will Eminem release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-EMI
+  external_question: Will Eminem release a new album in 2026?
+  rationale: "Both markets resolve on the same specific event: whether Eminem releases\
+    \ a new album in 2026. Polymarket's criteria provide detailed definitions (original\
+    \ album, official streaming/download availability), while Kalshi's criterion is\
+    \ terser but points to the same event via its ticker (KXALBUMRELEASE-26-EMI) and\
+    \ Eminem outcome label. Minor difference in resolution detail/source specificity\
+    \ is not a substantive conflict\u2014both hinge on an official new Eminem album\
+    \ release in 2026, excluding non-original compilations is a reasonable implicit\
+    \ assumption on both sides. Same subject, same year, same triggering event."
+  confidence: 0.92
+  proposed_ts: '2026-11-03T11:43:32+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
