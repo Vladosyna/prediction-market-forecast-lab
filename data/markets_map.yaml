@@ -4353,6 +4353,21 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x193811133067252c62713ace40b7e839ee92deb66e6c6de6650771e495ee4eeb'
+  question: Xochitl Gomez as America Chavez?
+  venue: kalshi
+  external_id: KXROLEINPRODUCTIONDOOMSDAY-XOC
+  external_question: 'Will Xochitl Gomez perform as America Chavez in Avengers: Doomsday?'
+  rationale: 'Both markets resolve on the same specific outcome: whether Xochitl Gomez
+    appears/perform as America Chavez in Avengers: Doomsday. Polymarket''s broader
+    market-set text is a generic template, but the named leg question matches Kalshi''s
+    specific outcome label exactly.'
+  confidence: 0.93
+  proposed_ts: '2026-11-05T13:10:26+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
