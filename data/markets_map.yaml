@@ -4368,6 +4368,25 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x3c1312e1589df1405a01bc9b481f89f012a5c263dae8712e1e5af70ab5240480'
+  question: "Will Diosdado Cabello Rond\xF3n be the de facto leader of Venezuela at\
+    \ the end of 2026?"
+  venue: kalshi
+  external_id: KXVENEZDEFACTO-27JAN01-DCAB
+  external_question: Will Diosdado Cabello de facto hold head of state of Venezuela
+    at the end of 2026?
+  rationale: Both markets ask whether Diosdado Cabello will de facto hold the head
+    of state position of Venezuela at the end of 2026. Polymarket provides detailed
+    de facto authority criteria; Kalshi's outcome is the specific 'Diosdado Cabello'
+    leg resolving Yes if he de facto holds head of state at end of 2026. The resolution
+    dates (Dec 31, 2026 / end of 2026) and the core criterion (de facto head of state)
+    align, so the legs describe the same event.
+  confidence: 0.9
+  proposed_ts: '2026-11-06T19:56:40+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
