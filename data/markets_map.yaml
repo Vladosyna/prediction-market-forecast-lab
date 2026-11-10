@@ -4387,6 +4387,28 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0x7590cbc21f9c580c11c83294b29070e4ce8629ef869058d84128407ae7ec36dd'
+  question: "Will Nicol\xE1s Maduro be the de facto leader of Venezuela at the end\
+    \ of 2026?"
+  venue: kalshi
+  external_id: KXVENEZDEFACTO-27JAN01-NMAD
+  external_question: "Will Nicol\xE1s Maduro de facto hold head of state of Venezuela\
+    \ at the end of 2026?"
+  rationale: "Both markets resolve on whether Nicol\xE1s Maduro is the de facto head\
+    \ of state of Venezuela at the end of 2026 (Dec 31, 2026). The Polymarket question\
+    \ names Maduro and the criteria define 'de facto holds' as exercising primary\
+    \ executive authority; Kalshi's specific outcome (ticker suffix NMAD, 'Nicol\xE1\
+    s Maduro' outcome) asks the same for the same person and same date. Resolution\
+    \ semantics align: effective governing control rather than formal recognition,\
+    \ and both reference end-of-2026 timing. Minor wording differences (Polymarket's\
+    \ more detailed fallback for 'No Head of State') don't change the substantive\
+    \ event for the Maduro leg. High confidence of identity."
+  confidence: 0.93
+  proposed_ts: '2026-11-10T11:23:17+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
