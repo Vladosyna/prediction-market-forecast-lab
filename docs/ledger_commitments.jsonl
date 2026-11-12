@@ -128,3 +128,5 @@
 {"committed_ts":"2026-11-10T11:21:47+00:00","date":"2026-11-07","first_id":3769459,"last_id":3814467,"ledger_id":"d4dd00f1","prospective":false,"row_count":45009,"sha256":"3dfa83b05b7844b70e7027493a90279cd5702ce115ee39ff3d8c43c53c140a3a"}
 {"committed_ts":"2026-11-10T11:22:07+00:00","date":"2026-11-08","first_id":null,"last_id":null,"ledger_id":"d4dd00f1","prospective":false,"row_count":0,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
 {"committed_ts":"2026-11-10T11:22:24+00:00","date":"2026-11-09","first_id":null,"last_id":null,"ledger_id":"d4dd00f1","prospective":true,"row_count":0,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
+{"committed_ts":"2026-11-12T19:50:55+00:00","date":"2026-11-10","first_id":3814468,"last_id":3859651,"ledger_id":"d4dd00f1","prospective":false,"row_count":45184,"sha256":"304e8b2329f6d1b2357caaff5aa1cece86a9661f098c6fed53dcaec9b98a0483"}
+{"committed_ts":"2026-11-12T19:51:14+00:00","date":"2026-11-11","first_id":null,"last_id":null,"ledger_id":"d4dd00f1","prospective":true,"row_count":0,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}
