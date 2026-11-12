@@ -4409,6 +4409,44 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: kalshi:KXBIGSKYOPEN-27-06DEC26
+  question: Will Big Sky open before Dec 6, 2026?
+  venue: kalshi
+  external_id: KXSTOWEOPEN-27-06DEC26
+  external_question: Will Stowe Mountain Resort open before Dec 6, 2026?
+  rationale: Same event type (ski resort opening date) with identical 'before Dec
+    6, 2026' resolution structure; only the resort differs (Stowe vs Big Sky), making
+    it the closest analog though not the same resort.
+  confidence: 0.85
+  proposed_ts: '2026-11-10T12:23:49+00:00'
+- condition_id: kalshi:KXHMONTH-26OCT
+  question: Will  Oct 2026 be the hottest Oct ever?
+  venue: kalshi
+  external_id: KXHMONTH-26OCT
+  external_question: Will  Oct 2026 be the hottest Oct ever?
+  rationale: 'Identical question: whether October 2026 will be the hottest October
+    on record.'
+  confidence: 0.99
+  proposed_ts: '2026-11-10T12:23:49+00:00'
+- condition_id: '0xc5b751a3ead913be1a0fa6f1f587a52dd1b7fb3a8f15288e43c430d54b6e8d52'
+  question: Will Frank Ocean release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-FRA
+  external_question: Will Frank Ocean release a new album in 2026?
+  rationale: "Both markets resolve on the same real-world event: whether Frank Ocean\
+    \ releases a new album in 2026. The Kalshi outcome 'Frank Ocean' (ticker suffix\
+    \ -FRA) corresponds directly to the Polymarket question. Polymarket's criteria\
+    \ are more detailed but consistent in substance\u2014an official new album release\
+    \ of original material in 2026. Minor definitional nuance (e.g., what counts as\
+    \ an 'album' vs. EP, or threshold rules) could theoretically create edge cases,\
+    \ but the core event and resolution timing align, warranting a high-confidence\
+    \ match."
+  confidence: 0.9
+  proposed_ts: '2026-11-12T19:51:43+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
