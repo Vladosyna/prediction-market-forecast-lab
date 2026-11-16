@@ -4447,6 +4447,24 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xc29194f3f96257d0e230310dc9ecd4258da318223174499451f8f3c29cecf9b3'
+  question: Will Germany recognize Palestine before 2027?
+  venue: kalshi
+  external_id: KXRECOGPALESTINE-27-GER
+  external_question: Who will recognize Palestine?
+  rationale: 'Both markets resolve on the same specific event: Germany formally recognizing
+    the State of Palestine before Jan 1, 2027 (Polymarket''s Dec 31, 2026 cutoff is
+    the same date). Polymarket''s ''will Germany recognize'' question aligns with
+    the Kalshi outcome leg ''Germany'' on the ''Who will recognize Palestine?'' market,
+    per its ticker KXRECOGPALESTINE-27-GER. Resolution criteria are substantively
+    identical (formal recognition required, announcements of intent insufficient per
+    Polymarket; same event and deadline). Minor wording differences only.'
+  confidence: 0.93
+  proposed_ts: '2026-11-16T22:48:21+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
