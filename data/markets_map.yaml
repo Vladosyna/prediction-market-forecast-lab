@@ -4465,6 +4465,55 @@ proposed:
   source_meta:
     relation_type: identity
     pmxt_confidence: 0.95
+- condition_id: '0xe67f4d31f0eba1b009b49d7a7739b2a5f53a2d7d979a0902b465a510492c33bb'
+  question: Will 2026 be the hottest year on record?
+  venue: kalshi
+  external_id: KXGTEMP-26-P0
+  external_question: Will 2026 be the hottest year on record?
+  rationale: "Identical question text: 'Will 2026 be the hottest year on record?'\
+    \ \u2014 same event and resolution."
+  confidence: 0.95
+  proposed_ts: '2026-11-16T23:15:20+00:00'
+- condition_id: kalshi:KXGTEMP-26-P0
+  question: Will 2026 be the hottest year on record?
+  venue: kalshi
+  external_id: KXGTEMP-26-P0
+  external_question: Will 2026 be the hottest year on record?
+  rationale: 'Identical question wording: ''Will 2026 be the hottest year on record?''
+    Same real-world event (2026 global temperature record) and same resolution framing.'
+  confidence: 0.9
+  proposed_ts: '2026-11-16T23:15:21+00:00'
+- condition_id: kalshi:KXGTEMP-26-P0
+  question: Will 2026 be the hottest year on record?
+  venue: kalshi
+  external_id: KXGTEMP-27-P0
+  external_question: Will 2026 be the hottest year on record?
+  rationale: Same question wording 'Will 2026 be the hottest year on record?'; the
+    -27 suffix likely denotes a contract year variant, but the question text and subject
+    (whether 2026 is the hottest year on record) match identically.
+  confidence: 0.75
+  proposed_ts: '2026-11-16T23:15:21+00:00'
+- condition_id: '0xca634275e74cabcc22dfc4b3528f9d195869aa4827c63005fa817f459dd19ee5'
+  question: Will Travis Scott release an album in 2026?
+  venue: kalshi
+  external_id: KXALBUMRELEASE-26-TRA
+  external_question: Will Travis Scott release a new album in 2026?
+  rationale: 'Both markets resolve on the same real-world event: Travis Scott officially
+    releasing a new album in 2026. The Kalshi outcome ''Travis Scott'' (ticker KXALBUMRELEASE-26-TRA)
+    is the specific leg corresponding to that artist, matching the Polymarket question.
+    Minor differences: Polymarket specifies detailed album-qualification rules (excluding
+    live/re-release/deluxe/compilation, requiring 50% new tracks) and resolution sources
+    (Spotify/Apple Music precedence) that Kalshi''s terse criteria omit, and Polymarket
+    deadlines to Dec 31, 2026 11:59 PM PT while Kalshi just says ''in 2026''. These
+    are edge-case definitional nuances unlikely to diverge for a normal studio album
+    release, and no clear contradictory criteria exist. Residual risk is low but nonzero
+    due to the absent qualifying rules on Kalshi, hence 0.9 rather than higher.'
+  confidence: 0.9
+  proposed_ts: '2026-11-22T15:21:01+00:00'
+  source: pmxt
+  source_meta:
+    relation_type: identity
+    pmxt_confidence: 0.95
 rejected:
 - condition_id: '0x836b850fc838195374862551a36f1c8691d96ff01e58b0a071f0fc1a0e357fb1'
   question: Will LeBron James win the 2028 US Presidential Election?
